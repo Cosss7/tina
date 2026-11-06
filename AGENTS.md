@@ -19,7 +19,7 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 | `docs/vision.md` | 产品最终形态：故事、架构、技术选型 | 改动涉及架构或产品方向时。它是定稿，改它要先讨论 |
 | `docs/h0.md` | 这一版写什么、怎么算完成、故意简化了什么 | 实现 H0 之前，以及每次不确定"这个要不要做"时 |
 | `docs/versioning.md` | 版本号、tag、发布流程 | 打 tag、改版本号、写发布说明时 |
-| `.agents/notes/2026-11-05-design-log.md` | D1–D47 的结论、被推翻的结论、判断集 J1–J7 | 想查某条设计为什么是这样，或准备推翻某条时 |
+| `.agents/notes/proposed/2026-11-05-design-log.md` | D1–D47 的结论、被推翻的结论、判断集 J1–J7 | 想查某条设计为什么是这样，或准备推翻某条时 |
 
 ## 代码布局
 
@@ -40,7 +40,7 @@ packages/ui-kit          组件库
 ## 约定
 
 - 提交信息用中文，`<type>: <一句话>`，正文说明为什么。type 取 `feat` / `fix` / `docs` / `refactor` / `test` / `chore`。
-- 改一条决策：先写进 `.agents/notes/` 的决策记录，再改 `docs/` 里受影响的投影。
+- 改一条决策：先写进 `.agents/notes/proposed/`，代码落地后移到 `implemented/`，再改 `docs/` 里受影响的投影。
 - 不把本机的绝对路径写进仓库。
 
 ## 验证
