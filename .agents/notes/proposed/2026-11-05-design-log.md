@@ -155,6 +155,20 @@ D48 的三条推论，都落在节点身上：
 
 还留着一个口子：进程内的 `agent.cancel({kind:'user'})` 是存在的（dsh 自己的"用户停止"走这条），所以**写一个 dsh 插件就能给会话补上 `session/interrupt`**。H0 不写，看 Router 实际会不会被打断再决定。
 
+### 2.6 增补（2026-11-06，M0.2 落地端口）
+
+`packages/engine-port` 与 `packages/engine-fake` 写完，`make verify` 跑得起来。实现阶段定下两条：
+
+| # | 结论 | 依据 |
+|---|---|---|
+| D52 | 连接方向是**节点监听、引擎拨入** | dsh 只肯说 stdio，它的 bridge 是进程内插件，能开 socket 但没地方把端口号告诉父进程。反过来由节点先监听、把端口和一次性令牌放进环境变量，子进程一句话不用多说。副作用正好和 D48 同构：一个引擎进程 = 一条连接 = 一个会话 |
+| D53 | TypeScript 不引入构建步骤：Node 直接跑 `.ts`，`node --test` 跑测试，`tsc -p` 只做类型检查 | H0 要"一条命令验证"，少一层产物目录和 sourcemap。代价是 import 必须带 `.ts` 后缀、不能用 enum 和参数属性，`erasableSyntaxOnly` 把这条守住 |
+
+配套的两条约定：
+
+- 端口包是纯 TypeScript，**不依赖 Effect**。Effect 只属于节点运行时（vision 3.3 ①），端口和 fake engine 要能被任何东西直接调用，包括测试。
+- fake engine 的确定性靠"seq 由端口层发号、时间戳从场景 `baseTime` 起每条加一秒"。同一份场景 + 同一段输入，两次运行的事件逐字节相同。
+
 ---
 
 ## 3. 推翻记录
@@ -222,3 +236,4 @@ Router 管"做什么"，控制面管"找得到"。两者从不直接通信：Rou
 | 2026-11-06 | 本文件移出 `archived/`，落到 `.agents/notes/proposed/`：归档不放活文件，记录按 proposed / implemented / rejected / archived 四态流动 |
 | 2026-11-06 | 定义里程碑与版本的关系：H0 是脚手架，H1 = v1，H2+ 是长期形态 |
 | 2026-11-06 | M0.1 bridge spike 完成：端口改为一会话一进程、`interrupt` 定两级语义、事件改用 dsh 真名、`fork` 归为插件能力（D48–D51） |
+| 2026-11-06 | M0.2 完成：`engine-port` 与 `engine-fake` 落地，引擎拨入节点（D52），TS 不设构建步骤（D53）；`make verify` 可跑 |

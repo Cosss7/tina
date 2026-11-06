@@ -1,0 +1,48 @@
+# 冒烟场景：两句输入，两段固定回放。
+version: 1
+engine: fake-engine
+capabilities:
+  interrupt: true
+  respond: true
+  fork: false
+  resume: true
+baseTime: 2026-01-01T00:00:00.000Z
+rules:
+  - match: 拆卡
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: message.start
+        payload: { text: 把这次需求拆成两张卡 }
+      - type: tool.call
+        payload: { callId: call-1, name: plan.split, arguments: '{"cards":2}' }
+      - type: tool.result
+        payload: { callId: call-1, isError: false, text: "已拆成 2 张" }
+      - type: message.end
+        payload: { text: '拆好了，两张卡，等你批计划。' }
+      - type: turn.end
+        payload: { turn: 1, reason: completed }
+  - match: 干活
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: tool.call
+        payload: { callId: call-2, name: pwsh, arguments: '{"command":"echo hi"}' }
+      - type: tool.result
+        payload: { callId: call-2, isError: false, text: hi }
+      - type: message.end
+        payload: { text: '干完了。' }
+      - type: turn.end
+        payload: { turn: 1, reason: completed }
+  - match: 慢活
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: message.start
+        payload: { text: '开始' }
+      - type: message.end
+        payload: { text: '收尾' }
+        delayMs: 200
+      - type: turn.end
+        payload: { turn: 1, reason: completed }
+        delayMs: 200
