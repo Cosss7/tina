@@ -61,6 +61,7 @@ export class Service {
   readonly #nodeId: string;
   readonly #runTurn: TurnRunner;
   readonly #workerAgentId: string;
+  readonly #inflight = new Map<string, Promise<void>>();
 
   constructor(options: ServiceOptions) {
     this.#store = options.store;
@@ -218,7 +219,11 @@ export class Service {
 
   // ── 派活 ─────────────────────────────────────────────────────────────────
 
-  async dispatch(input: { taskId: string; actor: string }): Promise<{ run: Run; task: Task; report: WorkerReport | null }> {
+  /**
+   * 派活。**立刻返回**：建好 Run、把卡片推进"进行中"，真正的执行在后台跑。
+   * 一轮真实会话可能要几十秒，让 HTTP 请求等着它只会等出超时。
+   */
+  dispatch(input: { taskId: string; actor: string }): { run: Run; task: Task } {
     const task = this.#requireTask(input.taskId);
     if (task.kind === 'demand') throw new ServiceError('invalid_argument', '需求卡不能直接派活，先拆成任务卡');
     if (!task.planApproved) throw new ServiceError('conflict', '计划还没批');
@@ -231,12 +236,23 @@ export class Service {
     this.#store.setRunState(run.id, 'dispatched');
     this.#store.setRunState(run.id, 'running');
     this.#store.appendEvent({ projectId: task.projectId, type: 'run.started', actor: this.#workerAgentId, payload: { runId: run.id, taskId: task.id } });
-    refreshStatus(this.#store, this.#requireTask(task.id));
+    const { task: running } = refreshStatus(this.#store, this.#requireTask(task.id));
 
-    let report: WorkerReport | null = null;
+    this.#inflight.set(run.id, this.#execute(run, task));
+    const stored = this.#store.getRun(run.id);
+    if (stored === undefined) throw new ServiceError('internal', 'Run 不见了');
+    return { run: stored, task: running };
+  }
+
+  /** 等一个 Run 跑完（测试和 demo 用，产品侧靠轮询看板）。 */
+  waitForRun(runId: string): Promise<void> {
+    return this.#inflight.get(runId) ?? Promise.resolve();
+  }
+
+  async #execute(run: Run, task: Task): Promise<void> {
     try {
       const result = await this.#runTurn(buildReportPrompt({ title: task.title, description: task.description }));
-      report = parseReport(result.text);
+      const report = parseReport(result.text);
       this.#store.createReport({
         runId: run.id,
         state: report.state,
@@ -253,12 +269,9 @@ export class Service {
       this.#store.createReport({ runId: run.id, state: 'failed', summary: `执行失败：${message}`, generated: true });
       this.#store.setRunState(run.id, 'failed', { error: message });
       this.#store.appendEvent({ projectId: task.projectId, type: 'run.failed', actor: this.#workerAgentId, payload: { runId: run.id, error: message } });
+    } finally {
+      refreshStatus(this.#store, this.#requireTask(task.id));
     }
-
-    const { task: refreshed } = refreshStatus(this.#store, this.#requireTask(task.id));
-    const stored = this.#store.getRun(run.id);
-    if (stored === undefined) throw new ServiceError('internal', 'Run 不见了');
-    return { run: stored, task: refreshed, report };
   }
 
   // ── 人终审 ───────────────────────────────────────────────────────────────

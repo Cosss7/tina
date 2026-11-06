@@ -94,6 +94,7 @@ export function App() {
         <div className={online ? 'status online' : 'status offline'}>
           {state === null ? '连接中…' : online ? `${state.nodes.filter((n) => n.online).map((n) => n.name).join('/')} 在线` : '节点离线'}
         </div>
+        {state !== null && <div className="version">v{state.version}</div>}
       </header>
 
       {error !== null && <div className="banner error">{error}</div>}

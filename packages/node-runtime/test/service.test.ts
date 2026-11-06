@@ -56,9 +56,11 @@ test('闭环：建卡 → 拆卡 → 批计划 → 派活 → 报告 → 评审 
   assert.ok(decided.tasks.every((task) => task.planApproved && task.status === 'todo'));
 
   const target = decided.tasks[0]!;
-  const dispatched = await service.dispatch({ taskId: target.id, actor: 'human' });
-  assert.equal(dispatched.run.state, 'completed');
-  assert.equal(dispatched.task.status, 'review', '有报告等人终审');
+  const dispatched = service.dispatch({ taskId: target.id, actor: 'human' });
+  assert.equal(dispatched.task.status, 'doing', '派出去就进进行中，不等跑完');
+  await service.waitForRun(dispatched.run.id);
+  assert.equal(store.getRun(dispatched.run.id)?.state, 'completed');
+  assert.equal(service.board('proj-1').cards.find((card) => card.id === target.id)?.status, 'review', '有报告等人终审');
 
   const reviewed = service.finalReview({ taskId: target.id, decision: 'approved', actor: 'human' });
   assert.equal(reviewed.status, 'done');
@@ -70,7 +72,8 @@ test('报告被解析后落库，字段一个不少', async () => {
   const approval = await service.requestPlan({ projectId: 'p', taskId: store.listTasks('p')[0]!.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
 
-  const { run } = await service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  const { run } = service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  await service.waitForRun(run.id);
   const report = store.getReportByRun(run.id);
   assert.ok(report);
   assert.equal(report.state, 'done');
@@ -92,9 +95,10 @@ test('blocked 的报告也进评审中，不自动失败', async () => {
   const approval = await service.requestPlan({ projectId: 'p', taskId: store.listTasks('p')[0]!.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
 
-  const { run, task } = await service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
-  assert.equal(run.state, 'completed');
-  assert.equal(task.status, 'review');
+  const { run } = service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  await service.waitForRun(run.id);
+  assert.equal(store.getRun(run.id)?.state, 'completed');
+  assert.equal(service.board('p').cards.find((card) => card.id === tasks[0]!.id)?.status, 'review');
   assert.equal(store.getReportByRun(run.id)?.state, 'blocked');
 });
 
@@ -109,9 +113,10 @@ test('报告解析不了时 Run 失败，并补一份 generated 的兜底报告'
   const approval = await service.requestPlan({ projectId: 'p', taskId: store.listTasks('p')[0]!.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
 
-  const { run } = await service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
-  assert.equal(run.state, 'failed');
-  assert.match(run.error ?? '', /找不到合法 JSON/);
+  const { run } = service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  await service.waitForRun(run.id);
+  assert.equal(store.getRun(run.id)?.state, 'failed');
+  assert.match(store.getRun(run.id)?.error ?? '', /找不到合法 JSON/);
   const report = store.getReportByRun(run.id);
   assert.equal(report?.generated, true);
   assert.equal(report?.state, 'failed');
@@ -120,14 +125,14 @@ test('报告解析不了时 Run 失败，并补一份 generated 的兜底报告'
 test('计划没批不能派活；需求卡不能直接派活', async () => {
   const { store, service } = setup();
   const demand = service.createDemand({ projectId: 'p', title: '需求', actor: 'human' });
-  await assert.rejects(service.dispatch({ taskId: demand.id, actor: 'human' }), (error: unknown) =>
+  assert.throws(() => service.dispatch({ taskId: demand.id, actor: 'human' }), (error: unknown) =>
     error instanceof ServiceError && /需求卡/.test(error.message));
 
   const approval = await service.requestPlan({ projectId: 'p', taskId: demand.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
   const task = store.getTask(tasks[0]!.id)!;
   store.updateTask(task, { planApproved: false });
-  await assert.rejects(service.dispatch({ taskId: task.id, actor: 'human' }), (error: unknown) =>
+  assert.throws(() => service.dispatch({ taskId: task.id, actor: 'human' }), (error: unknown) =>
     error instanceof ServiceError && /计划还没批/.test(error.message));
 });
 
@@ -146,7 +151,8 @@ test('每一步都留事件，且 seq 连续', async () => {
   const demand = service.createDemand({ projectId: 'p', title: '需求', actor: 'human' });
   const approval = await service.requestPlan({ projectId: 'p', taskId: demand.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
-  await service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  const last = service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  await service.waitForRun(last.run.id);
 
   const events = store.listEvents('p');
   assert.deepEqual(events.map((event) => event.seq), events.map((_, index) => index + 1));

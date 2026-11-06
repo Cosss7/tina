@@ -30,7 +30,7 @@ export interface NodeConfig {
   workDir: string;
 }
 
-export const VERSION = '0.1.0-dev';
+export const VERSION = '0.1.0';
 
 /** 两个演示项目：H0 的验收里"Web 上看到两个项目的看板"。 */
 export const DEFAULT_PROJECTS: ProjectRef[] = [

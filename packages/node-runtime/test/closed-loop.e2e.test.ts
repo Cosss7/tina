@@ -33,13 +33,14 @@ test('真 fake engine 跑完整闭环，计划与报告都能解析', async () =
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
   assert.equal(tasks.length, 2);
 
-  const first = await service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
-  assert.equal(first.run.state, 'completed');
-  assert.equal(first.task.status, 'review');
+  const first = service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
+  await service.waitForRun(first.run.id);
+  assert.equal(store.getRun(first.run.id)?.state, 'completed');
   assert.equal(store.getReportByRun(first.run.id)?.state, 'done');
 
-  const second = await service.dispatch({ taskId: tasks[1]!.id, actor: 'human' });
-  assert.equal(second.run.state, 'completed');
+  const second = service.dispatch({ taskId: tasks[1]!.id, actor: 'human' });
+  await service.waitForRun(second.run.id);
+  assert.equal(store.getRun(second.run.id)?.state, 'completed');
   const secondReport = store.getReportByRun(second.run.id);
   assert.equal(secondReport?.state, 'blocked');
   assert.deepEqual(secondReport?.blockers, ['订单接口需要新的 API key，现有凭据权限不够']);

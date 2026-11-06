@@ -37,7 +37,7 @@ test('控制面服务的是构建出来的前端，静态资源可取', async (t
   const state = await fetch(`http://127.0.0.1:${port}/api/state`);
   assert.equal(state.status, 200);
   const payload = (await state.json()) as { version: string };
-  assert.equal(payload.version, '0.1.0-dev');
+  assert.equal(payload.version, '0.1.0');
 });
 
 async function waitForHtml(port: number): Promise<string> {

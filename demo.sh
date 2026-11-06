@@ -3,6 +3,12 @@
 #
 # 它自己起控制面和节点，跑完收掉；不需要先 make up。默认用内存库，
 # 想留证据就 TINA_DB=.tina/demo.db bash demo.sh（记得先建目录）。
+#
+# 默认引擎是 fake。换成真 dsh：
+#   TINA_ENGINE_BIN=<packages/engine-dsh/src/bin.ts> \
+#   TINA_DSH_BIN=<dsh 的 lib/bin.js> \
+#   TINA_WORK_DIR=<工作目录> \
+#   bash demo.sh
 
 set -euo pipefail
 
@@ -30,19 +36,16 @@ post() {
   rm -f "${tmp}"
 }
 
-# 从 stdin 的 JSON 里取一个字段，点号可以取嵌套。
-field() {
-  node -e '
-    let raw = "";
-    process.stdin.on("data", (chunk) => (raw += chunk));
-    process.stdin.on("end", () => {
-      let value = JSON.parse(raw);
-      for (const key of process.argv[1].split(".")) value = value?.[key];
-      if (value === undefined) process.exit(1);
-      process.stdout.write(typeof value === "string" ? value : JSON.stringify(value));
-    });
-  ' "$1"
-}
+json() { node -e '
+  let raw = "";
+  process.stdin.on("data", (chunk) => (raw += chunk));
+  process.stdin.on("end", () => {
+    let value = JSON.parse(raw);
+    for (const key of process.argv[1].split(".")) value = value?.[key];
+    if (value === undefined) process.exit(1);
+    process.stdout.write(typeof value === "string" ? value : JSON.stringify(value));
+  });
+' "$1"; }
 
 board() {
   curl -fsS "${BASE}/api/board?project=${PROJECT}" | node -e '
@@ -59,6 +62,27 @@ board() {
       }
     });
   '
+}
+
+card_status() {
+  curl -fsS "${BASE}/api/board?project=${PROJECT}" | node -e '
+    let raw = "";
+    process.stdin.on("data", (chunk) => (raw += chunk));
+    process.stdin.on("end", () => {
+      const board = JSON.parse(raw);
+      const card = board.cards.find((item) => item.id === process.argv[1]);
+      process.stdout.write(card === undefined ? "missing" : card.status);
+    });
+  ' "$1"
+}
+
+wait_status() {
+  local id="$1" want="$2"
+  for _ in $(seq 1 600); do
+    [[ "$(card_status "${id}")" == "${want}" ]] && return 0
+    sleep 0.5
+  done
+  return 1
 }
 
 CP_PID=""
@@ -87,34 +111,40 @@ done
 note "控制面 ${BASE}，节点已注册"
 
 step "1. 建卡"
-TASK_ID=$(post "/api/cards" "{\"projectId\":\"${PROJECT}\",\"title\":\"网站改版\",\"description\":\"首屏和接口一起改，下周上线\"}" | field id)
+TASK_ID=$(post "/api/cards" "{\"projectId\":\"${PROJECT}\",\"title\":\"网站改版\",\"description\":\"首屏和接口一起改，下周上线\"}" | json id)
 note "需求卡 ${TASK_ID}"
 
 step "2. Router 拆卡"
-APPROVAL_ID=$(post "/api/plans" "{\"projectId\":\"${PROJECT}\",\"taskId\":\"${TASK_ID}\"}" | field id)
+APPROVAL_ID=$(post "/api/plans" "{\"projectId\":\"${PROJECT}\",\"taskId\":\"${TASK_ID}\"}" | json id)
 note "计划 ${APPROVAL_ID} 待批"
 board
 
 step "3. 批计划（批准后才会创建任务卡）"
-PLAN_TASKS=$(post "/api/plans/${APPROVAL_ID}/decide" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\"}" | field tasks)
-FIRST=$(echo "${PLAN_TASKS}" | node -e 'let raw="";process.stdin.on("data",(c)=>(raw+=c)).on("end",()=>process.stdout.write(JSON.parse(raw)[0].id));')
-SECOND=$(echo "${PLAN_TASKS}" | node -e 'let raw="";process.stdin.on("data",(c)=>(raw+=c)).on("end",()=>process.stdout.write(JSON.parse(raw)[1].id));')
-note "新任务卡 ${FIRST} / ${SECOND}"
+PLAN_TASKS=$(post "/api/plans/${APPROVAL_ID}/decide" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\"}" | json tasks)
+mapfile -t IDS < <(echo "${PLAN_TASKS}" | node -e '
+  let raw = "";
+  process.stdin.on("data", (chunk) => (raw += chunk));
+  process.stdin.on("end", () => {
+    for (const task of JSON.parse(raw)) console.log(task.id);
+  });
+')
+note "新任务卡 ${#IDS[@]} 张"
 board
 
-step "4. 派 worker（fake engine）"
-post "/api/tasks/${FIRST}/dispatch" "{\"projectId\":\"${PROJECT}\"}" >/dev/null
-note "第一张卡跑完，报告已落库"
+step "4. 派活（每张卡一个会话）"
+for id in "${IDS[@]}"; do
+  post "/api/tasks/${id}/dispatch" "{\"projectId\":\"${PROJECT}\"}" >/dev/null
+  note "派出 ${id}"
+done
+for id in "${IDS[@]}"; do
+  wait_status "${id}" review || { echo "有卡没跑到评审中：${id}" >&2; board; exit 1; }
+done
+note "全部跑完，报告已落库"
 board
 
-step "5. 派第二张"
-post "/api/tasks/${SECOND}/dispatch" "{\"projectId\":\"${PROJECT}\"}" >/dev/null
-note "第二张卡跑完（报告里带一条 blocker）"
-board
-
-step "6. 人终审第一张"
-post "/api/tasks/${FIRST}/review" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\",\"note\":\"验收通过\"}" >/dev/null
+step "5. 人终审第一张"
+post "/api/tasks/${IDS[0]}/review" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\",\"note\":\"验收通过\"}" >/dev/null
 board
 
 step "完成"
-note "库里：1 张需求卡 + 2 张任务卡；第一张已终审通过，第二张停在评审中"
+note "库里：1 张需求卡 + ${#IDS[@]} 张任务卡；第一张已终审通过，其余停在评审中"

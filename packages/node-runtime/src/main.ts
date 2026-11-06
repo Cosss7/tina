@@ -22,7 +22,7 @@ const service = new Service({
       scenario: config.scenario,
       cwd: config.workDir,
       prompt,
-      timeoutMs: 30_000,
+      timeoutMs: 180_000,
     }),
 });
 

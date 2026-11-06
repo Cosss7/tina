@@ -25,8 +25,10 @@ export function deriveStatus(store: Store, task: Task): TaskStatus {
   const runs = store.listRuns(task.id);
   if (runs.some((run) => ACTIVE_RUN_STATES.includes(run.state))) return 'doing';
 
-  const completed = runs.filter((run) => run.state === 'completed');
-  const hasReport = completed.some((run) => store.getReportByRun(run.id) !== undefined);
+  // 终端状态的 Run 只要有报告就进评审中——包括 failed 的兜底报告。
+  // 不然一次失败会被推导成"待办"，人就再也看不见它了。
+  const terminal = runs.filter((run) => run.state === 'completed' || run.state === 'failed' || run.state === 'cancelled');
+  const hasReport = terminal.some((run) => store.getReportByRun(run.id) !== undefined);
   if (hasReport) return 'review';
 
   return 'todo';

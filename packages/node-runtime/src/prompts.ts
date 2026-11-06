@@ -35,7 +35,8 @@ export interface ReportPromptInput {
 export function buildReportPrompt(input: ReportPromptInput): string {
   return [
     '[TINA:REPORT]',
-    '你是执行者。完成下面这张卡，然后交一份结构化报告。',
+    '你是执行者。这是一个联调环境，没有真实代码库，也没有需要你改的文件。',
+    '不要执行命令、不要读仓库，直接按下面的信息交一份结构化报告。',
     '',
     `标题：${input.title}`,
     `描述：${input.description || '（没有更多描述）'}`,

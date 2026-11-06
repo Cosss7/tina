@@ -197,6 +197,12 @@ importers:
         specifier: ^7.2.0
         version: 7.3.7(@types/node@24.19.2)(yaml@2.9.1)
 
+  packages/engine-dsh:
+    dependencies:
+      '@tina/engine-port':
+        specifier: workspace:*
+        version: link:../engine-port
+
   packages/engine-fake:
     dependencies:
       '@tina/engine-port':
