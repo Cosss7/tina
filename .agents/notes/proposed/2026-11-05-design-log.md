@@ -3,7 +3,7 @@
 > 这份文档记录**结论**和**变更**，不记录提问过程。
 > 产品文档见 [`docs/vision.md`](../../../docs/vision.md)；这份文件回答"我们定过什么、推翻过什么、还有什么没定"。
 >
-> 起于 2026-11-05。它现在是 `proposed/`：结论还没被代码验证，可以改；落地后移到 `implemented/`。旧内容保持原样，新结论写进 2.4 与末尾的变更记录。
+> 起于 2026-11-05。它现在是 `proposed/`：结论还没被代码验证，可以改；落地后移到 `implemented/`。旧内容保持原样，新结论写进末尾的增补小节与变更记录。
 
 ---
 
@@ -134,7 +134,26 @@
 
 1. **"Router 不亲手干"是三方独立收敛的结论**——文章说 Router 甚至可以不配 Bash，multica 的队长"派完活就停"。这不是我们的偏好，是结构上的必然。
 2. **沙箱不是 Worker 的定义属性，是部署形态的属性**。H0 没有沙箱，Worker 就是用户机器上的 dsh；边界是那个用户的操作系统权限。
-3. **事件语义的正确性吃掉大部分工程量**。multica 用一份 42KB 的工程文档加十几个迁移，处理回执消费、去重合并、自触发抑制、滚动升级期间的兼容。我们目前只有一张事件表——这是被低估得最多的一块。
+3. **事件语义的正确性吃掉大部分工程量**。multica 用一份 42KB 工程文档加十几个迁移，处理回执消费、去重合并、自触发抑制、滚动升级期间的兼容。我们目前只有一张事件表——这是被低估得最多的一块。
+
+### 2.5 增补（2026-11-06，M0.1 实测 dsh）
+
+跑了一次真 dsh，端口的形状被实测改了。证据在 [`2026-11-06-m0.1-bridge-spike.md`](2026-11-06-m0.1-bridge-spike.md)。
+
+| # | 结论 | 依据 |
+|---|---|---|
+| D48 | H0 的引擎端口按"一个会话 = 一个 dsh 进程"实现 | SDK 协议一共 7 个方法，没有任何按会话取消或关闭的方法；`shutdown` 只作用于进程。停一轮只能停进程。**这是 H0 的简化，不是终态**：vision 2.8 说的 bridge 插件能用 `agent.cancel({kind:'user'})` 做会话级取消，插件落地后一个进程可以托管多个会话 |
+| D49 | `interrupt` 分两级：先 `shutdown`，2 秒不退再硬杀 | `shutdown` 在工具执行中 193ms 退出码 0，落 `turn/end reason=aborted`；硬杀 12ms，下次 `resume` 才补 `interrupted` 与 `TOOL_OUTCOME_UNKNOWN` |
+| D50 | 端口事件保持产品级规范化，dsh 的原生事件名只活在 bridge 里 | vision 2.8 已经这么定，实测不改它。实测给的是**映射表要盖住哪些**：`turn/start · step/start · assistant/message · tool/call · tool/result · turn/end`；`turn/end.data.reason.kind` 是 Run 终态的唯一来源；`assistant/message` 带 5–6KB stream，映射时丢掉 |
+| D51 | `fork` 是插件能力，不是端口能力 | 协议没有 `session/fork`；进程内 `buildForkSeed` 只能从已落盘的事件前缀切，切不了进行中的轮次 |
+
+D48 的三条推论，都落在节点身上：
+
+1. 工具子进程不随引擎死（硬杀后 `Start-Sleep` 的 pwsh 还在），要自己收。
+2. 每次中断或崩溃之后，下一次 `send` 要付一次 `initialize`（实测 1.8s）。
+3. 事件要投影，不能原样入库——一个 step 的 `assistant/message` 光 stream 记录就有 5–6KB。
+
+还留着一个口子：进程内的 `agent.cancel({kind:'user'})` 是存在的（dsh 自己的"用户停止"走这条），所以**写一个 dsh 插件就能给会话补上 `session/interrupt`**。H0 不写，看 Router 实际会不会被打断再决定。
 
 ---
 
@@ -202,3 +221,4 @@ Router 管"做什么"，控制面管"找得到"。两者从不直接通信：Rou
 | 2026-11-06 | H0 规格成文：跑 Router、两层审批（计划 + 终审）、CI 用 fake engine；产物 `0.1.0` |
 | 2026-11-06 | 本文件移出 `archived/`，落到 `.agents/notes/proposed/`：归档不放活文件，记录按 proposed / implemented / rejected / archived 四态流动 |
 | 2026-11-06 | 定义里程碑与版本的关系：H0 是脚手架，H1 = v1，H2+ 是长期形态 |
+| 2026-11-06 | M0.1 bridge spike 完成：端口改为一会话一进程、`interrupt` 定两级语义、事件改用 dsh 真名、`fork` 归为插件能力（D48–D51） |
