@@ -33,6 +33,7 @@ type Hub struct {
 	nodes    map[string]*Node
 	projects map[string]*Project
 	order    []string
+	conns    map[string]*nodeConn
 	now      func() time.Time
 }
 
@@ -40,6 +41,7 @@ func NewHub() *Hub {
 	return &Hub{
 		nodes:    make(map[string]*Node),
 		projects: make(map[string]*Project),
+		conns:    make(map[string]*nodeConn),
 		now:      time.Now,
 	}
 }

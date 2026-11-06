@@ -15,7 +15,7 @@ TSC := node ./node_modules/typescript/bin/tsc
 EXE := $(shell go env GOEXE)
 BIN := .build/control-plane$(EXE)
 
-.PHONY: verify build typecheck test up clean
+.PHONY: verify build typecheck test up demo clean
 
 verify: build typecheck test
 
@@ -32,6 +32,9 @@ test: build
 
 up: build
 	node apps/cli/src/main.ts up
+
+demo: build
+	bash demo.sh
 
 clean:
 	rm -rf .build

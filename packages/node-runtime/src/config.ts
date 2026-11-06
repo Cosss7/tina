@@ -1,8 +1,10 @@
 /**
  * 节点运行时的启动配置。
  *
- * H0 是单机单用户，配置全部从环境变量来，不读文件也不连远端。
+ * H0 是单机单用户，配置全部从环境变量来，不读配置文件也不连远端。
  */
+
+import { fileURLToPath } from 'node:url';
 
 export interface ProjectRef {
   id: string;
@@ -18,6 +20,14 @@ export interface NodeConfig {
   projects: ProjectRef[];
   /** 心跳间隔。控制面的掉线阈值是 3 秒，这里取 1 秒。 */
   heartbeatMs: number;
+  /** 节点库路径，默认在内存里；demo 用文件，方便看。 */
+  dbPath: string;
+  /** fake engine 的可执行入口。 */
+  engineBin: string;
+  /** fake engine 的场景文件。 */
+  scenario: string;
+  /** 跑会话子进程时的工作目录。 */
+  workDir: string;
 }
 
 export const VERSION = '0.1.0-dev';
@@ -28,15 +38,22 @@ export const DEFAULT_PROJECTS: ProjectRef[] = [
   { id: 'proj-mobile', name: '移动端' },
 ];
 
+/** 这些默认路径都从本文件推出来，不写死机器上的目录。 */
+const PACKAGE_ROOT = new URL('../../../', import.meta.url);
+const pathFrom = (relative: string): string => fileURLToPath(new URL(relative, PACKAGE_ROOT));
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): NodeConfig {
-  const url = env.TINA_CONTROL_PLANE_URL ?? 'ws://127.0.0.1:7801/ws/node';
   return {
     nodeId: env.TINA_NODE_ID ?? 'node-local',
     name: env.TINA_NODE_NAME ?? '本机',
     version: VERSION,
-    controlPlaneUrl: url,
+    controlPlaneUrl: env.TINA_CONTROL_PLANE_URL ?? 'ws://127.0.0.1:7801/ws/node',
     projects: parseProjects(env.TINA_PROJECTS),
     heartbeatMs: parsePositiveInt(env.TINA_HEARTBEAT_MS, 1000),
+    dbPath: env.TINA_DB ?? ':memory:',
+    engineBin: env.TINA_ENGINE_BIN ?? pathFrom('packages/engine-fake/src/bin.ts'),
+    scenario: env.TINA_ENGINE_SCENARIO ?? pathFrom('packages/engine-fake/scenarios/demo.yml'),
+    workDir: env.TINA_WORK_DIR ?? process.cwd(),
   };
 }
 

@@ -1,12 +1,31 @@
 /**
- * 节点运行时的入口。M0.3 只做一件事：注册到控制面并保持心跳。
- * 托管项目、调度、引擎进程在 M0.4 接上来。
+ * 节点运行时的入口：建库、注册到控制面、把转发的请求落到 Service 上。
+ *
+ * 会话执行走 fake engine 子进程（M0.4 用假的跑闭环，真 dsh 留给手工验收）。
  */
 
 import { loadConfig } from './config.ts';
 import { NodeConnection } from './connection.ts';
+import { Store } from './db.ts';
+import { runTurn } from './engine-run.ts';
+import { createRpcHandler } from './rpc.ts';
+import { Service } from './service.ts';
 
 const config = loadConfig();
+const store = new Store(config.dbPath);
+const service = new Service({
+  store,
+  nodeId: config.nodeId,
+  runTurn: (prompt) =>
+    runTurn({
+      engineBin: config.engineBin,
+      scenario: config.scenario,
+      cwd: config.workDir,
+      prompt,
+      timeoutMs: 30_000,
+    }),
+});
+
 const connection = new NodeConnection(config, {
   onOpen: () => {
     console.log(`已连上控制面 ${config.controlPlaneUrl}，托管 ${config.projects.length} 个项目`);
@@ -17,6 +36,7 @@ const connection = new NodeConnection(config, {
   onError: (error) => {
     console.error(`连接出错：${error.message}`);
   },
+  onRequest: createRpcHandler(service),
 });
 
 connection.start();
@@ -26,6 +46,7 @@ function shutdown(): void {
   if (stopping) return;
   stopping = true;
   connection.stop();
+  store.close();
   console.log('已停止');
   process.exit(0);
 }

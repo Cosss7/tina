@@ -1,0 +1,85 @@
+# M0.4 闭环用的场景：Router 给计划，Worker 交报告。
+#
+# 匹配是「输入里要同时出现这些字」，从上往下第一条命中的赢。所以带标题的规则
+# 必须排在只带标记的规则前面。
+
+version: 1
+engine: fake-engine
+capabilities:
+  interrupt: true
+  respond: true
+  fork: false
+  resume: true
+baseTime: 2026-01-01T00:00:00.000Z
+
+rules:
+  # ── 协调者：把需求卡拆成两张 ──────────────────────────────────────────────
+  - match: ['TINA:PLAN']
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: message.end
+        payload:
+          text: |
+            {"summary":"把网站改版拆成首页和接口两块，先首页后接口",
+             "cards":[
+               {"key":"c1","title":"首页改版","description":"重排首屏信息层级，改完能直接上线",
+                "acceptance":["首屏三个主要入口在 1440px 下不换行","页面在移动端宽度下不横向滚动"],
+                "deps":[]},
+               {"key":"c2","title":"接口联调","description":"把首页要用的三个接口接通并补上错误处理",
+                "acceptance":["三个接口都有超时与重试","错误码有对应文案"],
+                "deps":["c1"]}
+             ]}
+      - type: turn.end
+        payload: { turn: 1, reason: completed }
+
+  # ── 执行者：首页改版 ─────────────────────────────────────────────────────
+  - match: ['TINA:REPORT', '标题：首页改版']
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: tool.call
+        payload: { callId: call-1, name: pwsh, arguments: '{"command":"echo 改首页"}' }
+      - type: tool.result
+        payload: { callId: call-1, isError: false, text: 改首页 }
+      - type: message.end
+        payload:
+          text: |
+            {"state":"done",
+             "summary":"首屏信息层级重排完成，三个入口在 1440px 下不换行，移动端不横向滚动",
+             "decisions":["保留原来的导航结构，只调整主次","主按钮从次要色换成品牌色"],
+             "artifacts":[{"path":"web/index.html","note":"首屏结构"}],
+             "blockers":[],
+             "usage":{"inputTokens":1200,"outputTokens":340}}
+      - type: turn.end
+        payload: { turn: 1, reason: completed }
+
+  # ── 执行者：接口联调 ─────────────────────────────────────────────────────
+  - match: ['TINA:REPORT', '标题：接口联调']
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: message.end
+        payload:
+          text: |
+            {"state":"blocked",
+             "summary":"三个接口里两个接通了，第三个返回 401，需要新的凭据",
+             "decisions":["先按重试三次、指数退避实现","错误文案走统一字典"],
+             "artifacts":[{"path":"services/api.md","note":"接口清单与错误码对照"}],
+             "blockers":["订单接口需要新的 API key，现有凭据权限不够"],
+             "usage":{"inputTokens":980,"outputTokens":210}}
+      - type: turn.end
+        payload: { turn: 1, reason: completed }
+
+  # ── 兜底：其它任何报告 ───────────────────────────────────────────────────
+  - match: ['TINA:REPORT']
+    events:
+      - type: turn.start
+        payload: { turn: 1 }
+      - type: message.end
+        payload:
+          text: |
+            {"state":"done","summary":"按验收标准做完了","decisions":[],
+             "artifacts":[],"blockers":[],"usage":{}}
+      - type: turn.end
+        payload: { turn: 1, reason: completed }

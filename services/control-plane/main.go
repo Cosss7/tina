@@ -41,6 +41,12 @@ func main() {
 		writeJSON(w, hub.Snapshot())
 	})
 	mux.HandleFunc("GET /ws/node", hub.ServeNodeWS)
+	mux.HandleFunc("GET /api/board", hub.board)
+	mux.HandleFunc("POST /api/cards", hub.createCard)
+	mux.HandleFunc("POST /api/plans", hub.requestPlan)
+	mux.HandleFunc("POST /api/plans/{id}/decide", hub.decidePlan)
+	mux.HandleFunc("POST /api/tasks/{id}/dispatch", hub.dispatchTask)
+	mux.HandleFunc("POST /api/tasks/{id}/review", hub.reviewTask)
 	mux.Handle("GET /", http.FileServerFS(static))
 
 	log.Printf("控制面在 http://%s 上线", *addr)

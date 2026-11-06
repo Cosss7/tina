@@ -19,7 +19,7 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 | `docs/vision.md` | 产品最终形态：故事、架构、技术选型 | 改动涉及架构或产品方向时。它是定稿，改它要先讨论 |
 | `docs/h0.md` | 这一版写什么、怎么算完成、故意简化了什么 | 实现 H0 之前，以及每次不确定"这个要不要做"时 |
 | `docs/versioning.md` | 版本号、tag、发布流程 | 打 tag、改版本号、写发布说明时 |
-| `.agents/notes/proposed/2026-11-05-design-log.md` | D1–D55 的结论、被推翻的结论、判断集 J1–J7 | 想查某条设计为什么是这样，或准备推翻某条时 |
+| `.agents/notes/proposed/2026-11-05-design-log.md` | D1–D58 的结论、被推翻的结论、判断集 J1–J7 | 想查某条设计为什么是这样，或准备推翻某条时 |
 | `.agents/notes/proposed/2026-11-06-m0.1-bridge-spike.md` | 真 dsh 实测：协议能做什么、中断是什么语义、事件长什么样 | 写引擎端口、dsh bridge，或怀疑"dsh 能不能……"时 |
 
 ## 代码布局
@@ -49,7 +49,7 @@ packages/ui-kit          组件库
 
 验证入口是 `make verify`：构建控制面 + 类型检查（`tsc -p`）+ 测试（`go test` 与 `node --test`，含真控制面真节点的端到端）。先 `pnpm install` 一次。
 
-本地起全栈用 `make up`（或 `node apps/cli/src/main.ts up`），打开 `http://127.0.0.1:7801`。两条硬性要求：
+本地起全栈用 `make up`（或 `node apps/cli/src/main.ts up`），打开 `http://127.0.0.1:7801`；想把闭环走一遍用 `make demo`。两条硬性要求：
 
 - `make verify` 必须离线可跑：不访问网络、不调用真实模型，引擎一律用 fake。
 - 真实模型的验证只出现在手动 demo 里，不进 CI。

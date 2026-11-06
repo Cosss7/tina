@@ -27,8 +27,8 @@ export interface EventSpec {
 }
 
 export interface Rule {
-  /** 输入里包含这段文字就算命中；`"*"` 命中一切。 */
-  match: string;
+  /** 输入里包含这些文字才算命中（多个条件是「都要满足」）；`"*"` 命中一切。 */
+  match: string[];
   events: EventSpec[];
 }
 
@@ -85,8 +85,12 @@ function parseCapabilities(raw: unknown, source: string): Capabilities {
 function parseRule(raw: unknown, source: string): Rule {
   if (typeof raw !== 'object' || raw === null) throw new Error(`${source} must be a mapping`);
   const input = raw as Record<string, unknown>;
-  if (typeof input.match !== 'string' || input.match === '') throw new Error(`${source}.match must be a non-empty string`);
-  return { match: input.match, events: parseEvents(input.events, `${source}.events`) };
+  const match = input.match;
+  const needles = typeof match === 'string' ? [match] : Array.isArray(match) ? match : null;
+  if (needles === null || needles.length === 0 || needles.some((item) => typeof item !== 'string' || item === '')) {
+    throw new Error(`${source}.match must be a non-empty string or a list of them`);
+  }
+  return { match: needles as string[], events: parseEvents(input.events, `${source}.events`) };
 }
 
 function parseEvents(raw: unknown, source: string): EventSpec[] {
@@ -113,7 +117,7 @@ function parseEvents(raw: unknown, source: string): EventSpec[] {
 
 export function pickRule(scenario: Scenario, input: string): EventSpec[] {
   for (const rule of scenario.rules) {
-    if (rule.match === '*' || input.includes(rule.match)) return rule.events;
+    if (rule.match.includes('*') || rule.match.every((needle) => input.includes(needle))) return rule.events;
   }
   return scenario.fallback;
 }

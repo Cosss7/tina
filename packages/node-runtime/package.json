@@ -3,8 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "dependencies": {
+    "@tina/engine-port": "workspace:*",
     "ws": "^8.18.3"
   },
   "devDependencies": {
