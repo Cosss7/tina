@@ -150,3 +150,6 @@ vite.config.ts.timestamp-*
 
 # 一次性 spike 的沙箱目录：打桩脚本、隔离的 DSH_HOME、日志
 .spike/
+
+# 构建产物
+.build/

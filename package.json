@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test",
-    "verify": "pnpm run typecheck && pnpm run test"
+    "verify": "pnpm run typecheck && pnpm run test",
+    "tina": "node apps/cli/src/main.ts"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

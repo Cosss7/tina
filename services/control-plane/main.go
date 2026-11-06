@@ -1,0 +1,58 @@
+package main
+
+import (
+	"embed"
+	"encoding/json"
+	"flag"
+	"io/fs"
+	"log"
+	"net/http"
+	"time"
+)
+
+const version = "0.1.0-dev"
+
+//go:embed web
+var webFS embed.FS
+
+func main() {
+	addr := flag.String("addr", "127.0.0.1:7801", "监听地址")
+	flag.Parse()
+
+	hub := NewHub()
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			hub.Sweep()
+		}
+	}()
+
+	static, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Fatalf("内嵌页面缺失: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"ok": true, "version": version})
+	})
+	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, hub.Snapshot())
+	})
+	mux.HandleFunc("GET /ws/node", hub.ServeNodeWS)
+	mux.Handle("GET /", http.FileServerFS(static))
+
+	log.Printf("控制面在 http://%s 上线", *addr)
+	if err := http.ListenAndServe(*addr, mux); err != nil {
+		log.Fatalf("控制面退出: %v", err)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		log.Printf("写响应失败: %v", err)
+	}
+}
