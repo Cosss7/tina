@@ -38,8 +38,15 @@ export interface CardView {
   kind: string;
   assigneeId: string | null;
   planApproved: boolean;
-  latestRun: { id: string; state: string; error: string | null } | null;
-  latestReport: { state: string; summary: string; generated: boolean } | null;
+  runs: Array<{ id: string; state: string; startedAt: string | null; endedAt: string | null; error: string | null }>;
+  latestReport: {
+    state: string;
+    summary: string;
+    decisions: unknown[];
+    artifacts: unknown[];
+    blockers: unknown[];
+    generated: boolean;
+  } | null;
   updatedAt: string;
 }
 
@@ -78,8 +85,18 @@ export class Service {
         kind: fresh.kind,
         assigneeId: fresh.assigneeId,
         planApproved: fresh.planApproved,
-        latestRun: latestRun === undefined ? null : { id: latestRun.id, state: latestRun.state, error: latestRun.error },
-        latestReport: report === undefined ? null : { state: report.state, summary: report.summary, generated: report.generated },
+        runs: runs.map((run) => ({ id: run.id, state: run.state, startedAt: run.startedAt, endedAt: run.endedAt, error: run.error })),
+        latestReport:
+          report === undefined
+            ? null
+            : {
+                state: report.state,
+                summary: report.summary,
+                decisions: report.decisions,
+                artifacts: report.artifacts,
+                blockers: report.blockers,
+                generated: report.generated,
+              },
         updatedAt: fresh.updatedAt,
       } satisfies CardView;
     });

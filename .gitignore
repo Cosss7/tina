@@ -153,3 +153,5 @@ vite.config.ts.timestamp-*
 
 # 构建产物
 .build/
+apps/web/dist/
+services/control-plane/web/

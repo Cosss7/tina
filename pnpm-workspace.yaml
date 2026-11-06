@@ -1,2 +1,7 @@
 packages:
+  - apps/*
   - packages/*
+
+# esbuild 的安装脚本负责落平台二进制；vite 的构建依赖它。
+allowBuilds:
+  esbuild: true
