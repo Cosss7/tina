@@ -63,6 +63,8 @@ func newHandler(projects *project.Service, hub *Hub, static fs.FS) http.Handler 
 	mux.HandleFunc("POST /api/plans/{id}/decide", a.decidePlan)
 	mux.HandleFunc("POST /api/tasks/{id}/dispatch", a.dispatchTask)
 	mux.HandleFunc("POST /api/tasks/{id}/review", a.reviewTask)
+	mux.HandleFunc("POST /api/runs/{id}/cancel", a.cancelRun)
+	mux.HandleFunc("POST /api/runs/{id}/reconcile", a.reconcileRun)
 	mux.Handle("GET /", http.FileServerFS(static))
 	return mux
 }
@@ -130,7 +132,7 @@ func (a *API) dispatchTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := a.projects.Dispatch(r.Context(), stringField(body, "projectId"), r.PathValue("id"), "human:local")
+	v, err := a.projects.Dispatch(r.Context(), stringField(body, "projectId"), r.PathValue("id"), "human:local", stringField(body, "resumeFromRunId"))
 	a.reply(w, v, err, 202)
 }
 func (a *API) reviewTask(w http.ResponseWriter, r *http.Request) {

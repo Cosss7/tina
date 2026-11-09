@@ -56,6 +56,7 @@ type Resumer interface {
 }
 
 type SessionInfo struct {
+	Uncertain    bool
 	SessionID    string
 	InstanceID   string
 	Handle       *protocol.SessionHandle

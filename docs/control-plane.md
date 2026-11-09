@@ -1,6 +1,6 @@
 # 控制面项目服务
 
-> P4 · 2026-11-09 · 项目业务、持久派发与执行事实接收已接通。
+> P5 · 2026-11-09 · 项目业务、持久派发、取消与异常对账已接通。
 > 修改项目 API、数据库、审批、报告或队列时读取本文；总体边界见 [架构](architecture.md)。
 
 ## 当前可用范围
@@ -67,10 +67,22 @@ node apps/cli/src/main.ts up --addr 127.0.0.1:7801 --db .tina/control-plane.db
 | `POST /api/plans` | `{projectId,taskId}` 排队 Router Run，202 返回 `{run,task}` |
 | `POST /api/plans/{id}/decide` | `{projectId,decision}` 批准或拒绝待批计划 |
 | `POST /api/tasks/{id}/dispatch` | `{projectId}` 校验依赖并排队 Worker Run，返回 202 |
+| `POST /api/runs/{id}/cancel` | `{projectId,reason?}` 持久请求取消；未派发的原子撤回，运行中的等待有效终态 |
+| `POST /api/runs/{id}/reconcile` | `{projectId}` 请求核查已派发尝试，不触发第二次执行 |
 | `POST /api/tasks/{id}/review` | `{projectId,decision,note?}` 人终审 |
 | `GET /api/events?project=...` | 读取项目产品事件 |
 | `GET /api/queue?project=...` | 查看尚未发送的执行请求 |
 
 decision 为 approved/rejected。所有变更均核对项目与目标记录的关联；错误决策、跨项目操作、重复活跃请求与重复审批会被拒绝。请求体限制 1 MiB。旧 `/ws/node` 当前仅保留在线状态观测；收到的项目声明不能创建或重新归属项目，也没有业务 RPC 转发。
+
+## 取消与恢复
+
+Run 的 cancellation 保存首次请求 ID、操作者、原因和时间，重复请求复用原操作。请求与接受回执都不等于执行已结束；收到对应活动的有效终态才结算。停止结果不明时 needsReconciliation 保持 true，diagnostic 给出核查原因。断连、超时、命令记录缺失都不能证明未执行或已停止。
+
+发送过的取消可按同一 ID 重传，但只针对原活动/实例，不作用于后续回合。完成先取得有效终态时，取消不覆盖 completed。运行时清理作为独立 stop 事实，清理不足不会改写模型结果；仍未确认的工具工作负载会阻止同一卡片开始下一次尝试。
+
+派活可带 `resumeFromRunId`，要求来源是同一卡片上已结束、拥有真实句柄的尝试，且没有未确认的活跃工作负载。新的 Run 和命令/活动 ID 与原尝试不同，沿用逻辑会话和原生句柄。引擎拒绝恢复会明确失败，不能退回新建。Router 的显式记忆仍在控制面维护，不依赖恢复某个本机进程。
+
+重启后缺少可验证停止/结果证据的执行保持隔离，重新对账只询问事实。外部副作用仍需操作者核查，不提供伪造“已停止”的按钮来强行解锁重跑。
 
 `make verify` 验证 Go 业务与 API、P1 契约、真实进程重启、无节点排队演示及保留的 H0 隔离场景。重点覆盖事务回滚、依赖校验、重复请求竞争、恢复后的待批计划/报告与跨项目隔离。真实引擎与完整跨机器闭环不属于本阶段通过的验收。

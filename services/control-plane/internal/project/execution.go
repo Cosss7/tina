@@ -80,6 +80,7 @@ func (s *Service) Claim(ctx context.Context, registration p.Register) (*p.Dispat
 				}
 			}
 			d := p.Dispatch{CommandID: run.CommandID, Execution: refs(run), Config: p.SessionConfig{EngineID: agent.EngineID, Cwd: agent.Cwd, Model: agent.Model, Options: agent.Options}, Input: input}
+			d.Resume = job.Resume
 			if err := d.Validate(); err != nil {
 				return err
 			}
@@ -101,7 +102,7 @@ func (s *Service) Claim(ctx context.Context, registration p.Register) (*p.Dispat
 	return dispatch, err
 }
 func (s *Service) KnownExecutions(ctx context.Context, nodeID string) ([]p.Cursor, error) {
-	runs, err := many[Run](ctx, s.db, "select body from run where state in ('dispatched','running') and json_extract(body,'$.nodeId')=? order by rowid", nodeID)
+	runs, err := many[Run](ctx, s.db, "select body from run where (state in ('dispatched','running') or json_extract(body,'$.needsReconciliation')=1) and json_extract(body,'$.nodeId')=? order by rowid", nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +170,12 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 			if run.InstanceID != "" && observation.InstanceID != "" && run.InstanceID != observation.InstanceID {
 				return problem("conflict", "Reconciliation instance identity mismatch")
 			}
-			run.NeedsReconciliation = observation.State != "running"
+			run.NeedsReconciliation = observation.State != "running" || (run.Cancellation != nil && run.Cancellation.Admission == p.Unknown)
+			if observation.State == "unknown" {
+				run.Diagnostic = "执行状态未能确认；请核查本机进程及外部副作用后重新对账"
+			} else if !run.NeedsReconciliation {
+				run.Diagnostic = ""
+			}
 			if err := updateRun(ctx, tx, run); err != nil {
 				return err
 			}
@@ -194,8 +200,39 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 	if err != nil {
 		return err
 	}
-	if run.NodeID != nodeID || refs(run) != execution || run.CommandID != commandID {
+	if run.NodeID != nodeID || refs(run) != execution {
 		return problem("conflict", "Execution fact does not match a dispatched command")
+	}
+	job, err := one[Job](ctx, tx, "select body from execution_request where run_id=?", run.ID)
+	if err != nil {
+		return err
+	}
+	if job.Dispatch == nil {
+		return problem("conflict", "No execution command was issued for this Run")
+	}
+	if receipt, ok := frame.Message.(*p.Receipt); ok && run.Cancellation != nil && commandID == run.Cancellation.CommandID {
+		if run.InstanceID != "" && instance != "" && run.InstanceID != instance {
+			return problem("conflict", "Cancellation receipt targets another runtime instance")
+		}
+		run.Cancellation.Admission, run.Cancellation.Failure, run.Cancellation.Stop = receipt.Admission, receipt.Failure, receipt.Stop
+		if !terminal(run.State) {
+			run.Cancellation.State = string(receipt.Admission)
+			if receipt.Admission == p.Unknown {
+				run.NeedsReconciliation = true
+				run.Diagnostic = receipt.Failure.Message
+			}
+		}
+		if err := updateRun(ctx, tx, run); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "update cancel_request set state=? where id=?", run.Cancellation.State, commandID); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "insert into execution_fact(node_id,message_id,run_id,instance_id,seq,frame) values(?,?,?,?,0,?)", nodeID, frame.ID, run.ID, instance, encoded)
+		return err
+	}
+	if run.CommandID != commandID {
+		return problem("conflict", "Unknown execution command identity")
 	}
 	if run.InstanceID != "" && instance != "" && run.InstanceID != instance {
 		return problem("conflict", "Execution instance identity mismatch")
@@ -222,6 +259,7 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 	if instance != "" {
 		run.InstanceID = instance
 	}
+	previousSeq := run.LastSeq
 	if seq > run.LastSeq {
 		run.LastSeq = seq
 	}
@@ -233,6 +271,9 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 				run.Admission = message.Admission
 			}
 			run.NeedsReconciliation = message.Admission == p.Unknown
+			if message.Admission == p.Unknown {
+				run.Diagnostic = message.Failure.Message
+			}
 			if message.Admission == p.Rejected {
 				if err := updateRun(ctx, tx, run); err != nil {
 					return err
@@ -248,7 +289,20 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 		}
 	case *p.Event:
 		if message.Kind == p.StopReported {
-			run.Stop = message.Stop
+			if seq >= previousSeq || run.Stop == nil {
+				run.Stop = message.Stop
+			}
+			if terminal(run.State) {
+				run.NeedsReconciliation = !run.Stop.ConfirmsStop()
+				if run.NeedsReconciliation {
+					run.Diagnostic = run.Stop.Detail
+					if run.Diagnostic == "" {
+						run.Diagnostic = "引擎或工具进程退出尚未确认"
+					}
+				} else {
+					run.Diagnostic = ""
+				}
+			}
 		}
 		if message.Kind == p.SessionOpened {
 			run.Handle = message.Handle
@@ -258,7 +312,7 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 			run.StartedAt = &started
 			run.State = "running"
 			run.Admission = p.Accepted
-			run.NeedsReconciliation = false
+			run.NeedsReconciliation = run.Cancellation != nil && run.Cancellation.Admission == p.Unknown
 			if err := emit(ctx, tx, run.ProjectID, "run.started", run.AgentID, run); err != nil {
 				return err
 			}
@@ -266,8 +320,11 @@ func receive(ctx context.Context, tx *sql.Tx, nodeID string, frame p.Frame) erro
 	case *p.Result:
 		if !wasTerminal {
 			run.NeedsReconciliation = false
+			run.Diagnostic = ""
 			run.Handle = message.Handle
-			run.Stop = message.Stop
+			if message.Stop != nil || run.Stop == nil {
+				run.Stop = message.Stop
+			}
 			if err := updateRun(ctx, tx, run); err != nil {
 				return err
 			}

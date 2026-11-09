@@ -99,6 +99,33 @@ func (a *API) routerMemory(w http.ResponseWriter, r *http.Request) {
 	project, err := a.projects.SetRouterMemory(r.Context(), r.PathValue("id"), stringField(body, "text"), "human:local")
 	a.reply(w, project, err, 200)
 }
+func (a *API) cancelRun(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	run, err := a.projects.CancelRun(r.Context(), stringField(body, "projectId"), r.PathValue("id"), stringField(body, "reason"), "human:local")
+	a.reply(w, run, err, 202)
+}
+func (a *API) reconcileRun(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	run, err := a.projects.RequestReconciliation(r.Context(), stringField(body, "projectId"), r.PathValue("id"), "human:local")
+	if err == nil {
+		a.hub.mu.Lock()
+		peer := a.hub.peers[run.NodeID]
+		a.hub.mu.Unlock()
+		if peer != nil {
+			if sendErr := peer.send(r.Context(), p.ReconcileRequest{NodeID: run.NodeID, Known: []p.Cursor{{Execution: p.Execution{ProjectID: run.ProjectID, RunID: run.ID, AgentID: run.AgentID, NodeID: run.NodeID, SessionID: run.SessionID, ActivityID: run.ActivityID}, InstanceID: run.InstanceID, LastSeq: run.LastSeq}}}); sendErr != nil {
+				log.Printf("Request reconciliation: %v", sendErr)
+			}
+		}
+	}
+	a.reply(w, run, err, 202)
+}
+
 func (a *API) serveExecution(w http.ResponseWriter, request *http.Request) {
 	nodeID := request.Header.Get("X-Tina-Node")
 	authorization := request.Header.Get("Authorization")
@@ -180,6 +207,8 @@ func (a *API) serveExecution(w http.ResponseWriter, request *http.Request) {
 func (a *API) dispatchLoop(ctx context.Context, peer *executionPeer) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	sentCancels := map[string]time.Time{}
+	lastReconciliation := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -190,6 +219,27 @@ func (a *API) dispatchLoop(ctx context.Context, peer *executionPeer) {
 			peer.cancel()
 			peer.conn.CloseNow()
 			return
+		}
+		cancellations, err := a.projects.PendingCancellations(ctx, peer.registration.NodeID)
+		if err != nil {
+			continue
+		}
+		for _, request := range cancellations {
+			if time.Since(sentCancels[request.CommandID]) >= time.Second {
+				if err := peer.send(ctx, request); err != nil {
+					return
+				}
+				sentCancels[request.CommandID] = time.Now()
+			}
+		}
+		if time.Since(lastReconciliation) >= 2*time.Second {
+			known, err := a.projects.KnownExecutions(ctx, peer.registration.NodeID)
+			if err == nil && len(known) > 0 {
+				if err := peer.send(ctx, p.ReconcileRequest{NodeID: peer.registration.NodeID, Known: known}); err != nil {
+					return
+				}
+			}
+			lastReconciliation = time.Now()
 		}
 		dispatch, err := a.projects.Claim(ctx, peer.registration)
 		if err != nil {

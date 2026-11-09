@@ -71,6 +71,19 @@ type Run struct {
 	NeedsReconciliation bool             `json:"needsReconciliation"`
 	Handle              *p.SessionHandle `json:"handle,omitempty"`
 	Stop                *p.StopEvidence  `json:"stop,omitempty"`
+	Cancellation        *Cancellation    `json:"cancellation,omitempty"`
+	Diagnostic          string           `json:"diagnostic,omitempty"`
+}
+
+type Cancellation struct {
+	CommandID   string          `json:"commandId"`
+	RequestedAt string          `json:"requestedAt"`
+	RequestedBy string          `json:"requestedBy"`
+	Reason      string          `json:"reason"`
+	State       string          `json:"state"`
+	Admission   p.Admission     `json:"admission,omitempty"`
+	Failure     *p.Failure      `json:"failure,omitempty"`
+	Stop        *p.StopEvidence `json:"stop,omitempty"`
 }
 
 type Report struct {
@@ -110,13 +123,14 @@ type Event struct {
 // Job is a durable request awaiting execution. An unbound Agent may have no node
 // yet; a versioned dispatch can only be built once an authorized node is chosen.
 type Job struct {
-	CommandID string      `json:"commandId"`
-	RunID     string      `json:"runId"`
-	ProjectID string      `json:"projectId"`
-	AgentID   string      `json:"agentId"`
-	State     string      `json:"state"`
-	Prompt    string      `json:"prompt"`
-	Dispatch  *p.Dispatch `json:"dispatch,omitempty"`
+	Resume    *p.SessionHandle `json:"resume,omitempty"`
+	CommandID string           `json:"commandId"`
+	RunID     string           `json:"runId"`
+	ProjectID string           `json:"projectId"`
+	AgentID   string           `json:"agentId"`
+	State     string           `json:"state"`
+	Prompt    string           `json:"prompt"`
+	Dispatch  *p.Dispatch      `json:"dispatch,omitempty"`
 }
 
 type CardView struct {

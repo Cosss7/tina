@@ -46,6 +46,7 @@ create table if not exists execution_fact (
  node_id text not null, message_id text not null, run_id text,instance_id text,seq integer not null default 0,frame blob not null,
  primary key(node_id,message_id));
 create unique index if not exists execution_sequence on execution_fact(node_id,instance_id,seq) where seq>0;
+create table if not exists cancel_request(id text primary key,run_id text not null unique references run(id),state text not null,body text not null);
 `
 
 type Service struct{ db *sql.DB }

@@ -58,6 +58,9 @@ func TestSDKFixture(t *testing.T) {
 				encoder.Encode(map[string]any{"method": "session.event", "params": map[string]any{"sessionId": request.Params.SessionID, "event": map[string]any{"type": kind, "data": body}}})
 			}
 			data("turn/start", map[string]any{})
+			if len(request.Params.ContentBlocks) > 0 && request.Params.ContentBlocks[0].Text == "crash" {
+				os.Exit(42)
+			}
 			if len(request.Params.ContentBlocks) > 0 && request.Params.ContentBlocks[0].Text == "hang" {
 				continue
 			}

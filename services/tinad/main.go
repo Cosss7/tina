@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -54,8 +55,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("tinad %s connecting to control plane", config.NodeID)
-	node.Run(ctx)
+	runErr := node.Run(ctx)
 	if err := node.Close(); err != nil {
 		log.Printf("tinad cleanup: %v", err)
+	}
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		log.Printf("tinad stopped: %v", runErr)
+		os.Exit(1)
 	}
 }

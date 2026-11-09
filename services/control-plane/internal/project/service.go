@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+
+	p "github.com/Cosss7/tina/packages/protocol"
 )
 
 func (s *Service) CreateProject(ctx context.Context, projectID, name, actor string) (Project, error) {
@@ -144,7 +146,7 @@ func (s *Service) RequestPlan(ctx context.Context, projectID, taskID, actor stri
 	return queued, err
 }
 
-func (s *Service) Dispatch(ctx context.Context, projectID, taskID, actor string) (Queued, error) {
+func (s *Service) Dispatch(ctx context.Context, projectID, taskID, actor string, resumeFrom ...string) (Queued, error) {
 	var queued Queued
 	err := s.change(ctx, func(tx *sql.Tx) error {
 		task, err := requireTask(ctx, tx, projectID, taskID)
@@ -157,6 +159,28 @@ func (s *Service) Dispatch(ctx context.Context, projectID, taskID, actor string)
 		if task.Status == "done" {
 			return problem("conflict", "Card has already passed final review")
 		}
+		previous, err := many[Run](ctx, tx, "select body from run where task_id=? order by rowid", task.ID)
+		if err != nil {
+			return err
+		}
+		for _, prior := range previous {
+			if prior.InstanceID != "" && terminal(prior.State) && prior.Admission != p.Rejected && (prior.Stop == nil || !prior.Stop.ConfirmsStop()) {
+				return problem("conflict", "Prior workload cleanup is not confirmed; reconcile before retrying")
+			}
+		}
+		var resume *Run
+		if len(resumeFrom) > 0 && resumeFrom[0] != "" {
+			for _, prior := range previous {
+				if prior.ID == resumeFrom[0] {
+					copy := prior
+					resume = &copy
+					break
+				}
+			}
+			if resume == nil || !terminal(resume.State) || resume.Handle == nil {
+				return problem("conflict", "A terminal Run with a native handle from this task is required for resume")
+			}
+		}
 		for _, depID := range task.Deps {
 			dep, err := requireTask(ctx, tx, projectID, depID)
 			if err != nil {
@@ -166,13 +190,13 @@ func (s *Service) Dispatch(ctx context.Context, projectID, taskID, actor string)
 				return problem("conflict", "Task dependencies have not passed final review")
 			}
 		}
-		queued, err = enqueue(ctx, tx, task, "worker", "report", actor)
+		queued, err = enqueue(ctx, tx, task, "worker", "report", actor, resume)
 		return err
 	})
 	return queued, err
 }
 
-func enqueue(ctx context.Context, tx *sql.Tx, task Task, role, purpose, actor string) (Queued, error) {
+func enqueue(ctx context.Context, tx *sql.Tx, task Task, role, purpose, actor string, resume ...*Run) (Queued, error) {
 	var active int
 	if err := tx.QueryRowContext(ctx, "select count(*) from run where task_id=? and state in ('queued','dispatched','running')", task.ID).Scan(&active); err != nil {
 		return Queued{}, err
@@ -192,10 +216,20 @@ func enqueue(ctx context.Context, tx *sql.Tx, task Task, role, purpose, actor st
 	}
 	run := Run{ID: id("run"), ProjectID: task.ProjectID, TaskID: task.ID, AgentID: agent.ID, NodeID: agent.NodeID,
 		OriginatorID: actor, Purpose: purpose, State: "queued", CommandID: id("command"), SessionID: id("session"), ActivityID: id("activity")}
+	var handle *p.SessionHandle
+	if len(resume) > 0 && resume[0] != nil {
+		prior := resume[0]
+		if prior.AgentID != agent.ID || prior.Handle.EngineID != agent.EngineID {
+			return Queued{}, problem("conflict", "Native session does not match the selected Agent/engine")
+		}
+		run.SessionID = prior.SessionID
+		handle = prior.Handle
+	}
 	if err := save(ctx, tx, "insert into run(id,project_id,task_id,state,body) values(?,?,?,?,?)", run, run.ID, run.ProjectID, task.ID, run.State); err != nil {
 		return Queued{}, err
 	}
 	job := Job{CommandID: run.CommandID, RunID: run.ID, ProjectID: run.ProjectID, AgentID: agent.ID, State: "queued", Prompt: prompt(task, purpose)}
+	job.Resume = handle
 	if err := save(ctx, tx, "insert into execution_request(command_id,run_id,project_id,state,body) values(?,?,?,?,?)", job, job.CommandID, run.ID, run.ProjectID, job.State); err != nil {
 		return Queued{}, err
 	}

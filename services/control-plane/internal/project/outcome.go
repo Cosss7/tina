@@ -155,6 +155,12 @@ func recordOutcome(ctx context.Context, tx *sql.Tx, runID, output, executionFail
 	}
 	ended := now()
 	run.EndedAt = &ended
+	if run.Cancellation != nil {
+		run.Cancellation.State = "settled"
+		if _, err := tx.ExecContext(ctx, "update cancel_request set state='settled' where run_id=?", run.ID); err != nil {
+			return err
+		}
+	}
 	if err := save(ctx, tx, "insert into report(id,run_id,body) values(?,?,?)", report, report.ID, runID); err != nil {
 		return err
 	}

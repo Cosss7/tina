@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,26 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 	if err := validateConfig(o.Config); err != nil {
 		return nil, err
 	}
+	cwd, err := filepath.Abs(o.Config.Cwd)
+	if err != nil {
+		return nil, err
+	}
+	o.Config.Cwd = cwd
+	home := d.Options.Home
+	if home == "" {
+		home = os.Getenv("DSH_HOME")
+	}
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		home = filepath.Join(userHome, ".dsh")
+	}
+	home, err = filepath.Abs(home)
+	if err != nil {
+		return nil, err
+	}
 	if len(d.Options.Command) == 0 {
 		return nil, engine.ErrUnavailable
 	}
@@ -68,9 +89,7 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 	cmd := exec.Command(d.Options.Command[0], args...)
 	cmd.Dir = o.Config.Cwd
 	cmd.Env = os.Environ()
-	if d.Options.Home != "" {
-		cmd.Env = append(cmd.Env, "DSH_HOME="+d.Options.Home)
-	}
+	cmd.Env = append(cmd.Env, "DSH_HOME="+home)
 	stdinRead, stdin, err := os.Pipe()
 	if err != nil {
 		return nil, err
@@ -101,6 +120,8 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 		return nil, fmt.Errorf("start dsh %q: %w", d.Options.Command[0], err)
 	}
 	s := &Session{scope: scope, stdin: stdin, updates: make(chan engine.Update, 256), nativeID: "tina-" + rand.Text(), info: engine.SessionInfo{SessionID: o.SessionID, InstanceID: rand.Text(), Capabilities: p.Capabilities{Interrupt: p.InterruptProcess}}, commands: map[string]p.Receipt{}, fingerprints: map[string]string{}}
+	s.cwd = o.Config.Cwd
+	s.home = home
 	s.rpc = newRPC(stdin, stdout, stderr, s.onEvent)
 	cleanup := func(cause error) (engine.Session, error) {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -141,16 +162,15 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 		if resume.EngineID != "dsh" || resume.SessionID != o.SessionID {
 			return cleanup(engine.ErrResumeRejected)
 		}
-		if resume.Metadata["home"] != d.Options.Home {
+		if resume.Metadata["home"] != home || resume.Metadata["cwd"] != o.Config.Cwd {
 			return cleanup(fmt.Errorf("%w: persistence home changed", engine.ErrResumeRejected))
 		}
 		s.nativeID = resume.NativeID
 		if err := s.rpc.call(callCtx, "session/resume", map[string]any{"sessionId": resume.NativeID}, nil); err != nil {
 			return cleanup(fmt.Errorf("%w: %v", engine.ErrResumeRejected, err))
 		}
-		s.setHandle(d.Options.Home)
+		s.setHandle(home)
 	}
-	s.home = d.Options.Home
 	go s.watch()
 	return s, nil
 }
@@ -159,6 +179,7 @@ type Session struct {
 	mu             sync.Mutex
 	info           engine.SessionInfo
 	nativeID, home string
+	cwd            string
 	scope          *process.Scope
 	rpc            *rpc
 	updates        chan engine.Update
@@ -177,15 +198,20 @@ func (s *Session) Info() engine.SessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	info := s.info
+	select {
+	case <-s.rpc.done:
+		info.Uncertain = true
+	default:
+	}
 	if info.Handle != nil {
 		h := *info.Handle
-		h.Metadata = map[string]string{"home": s.home}
+		h.Metadata = map[string]string{"home": s.home, "cwd": s.cwd}
 		info.Handle = &h
 	}
 	return info
 }
 func (s *Session) setHandle(home string) {
-	s.info.Handle = &p.SessionHandle{EngineID: "dsh", SessionID: s.info.SessionID, NativeID: s.nativeID, Metadata: map[string]string{"home": home}}
+	s.info.Handle = &p.SessionHandle{EngineID: "dsh", SessionID: s.info.SessionID, NativeID: s.nativeID, Metadata: map[string]string{"home": home, "cwd": s.cwd}}
 	s.info.Capabilities.Resume = true
 }
 func (s *Session) Updates() <-chan engine.Update { return s.updates }
@@ -365,6 +391,13 @@ func (s *Session) Close(ctx context.Context) (p.StopEvidence, error) {
 	s.mu.Lock()
 	s.stopping = true
 	s.mu.Unlock()
+	select {
+	case <-s.scope.Done():
+	default:
+		grace, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		s.rpc.call(grace, "shutdown", nil, nil)
+		cancel()
+	}
 	proof, err := s.scope.Stop(ctx)
 	s.stdin.Close()
 	s.mu.Lock()

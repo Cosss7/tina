@@ -6,7 +6,7 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 
 **H0 已完成**，产出 `0.1.0`：单机跑通"建卡 → Router 拆卡 → 派 worker → 收报告 → 人终审"，真 dsh 手工验收通过。结果与遗留问题见 `docs/h0-report.md`。
 
-**下一阶段是 H1 = `1.0.0`**。按 [docs/next-implementation-plan.md](docs/next-implementation-plan.md) 迁移：P1–P4 已有协议、控制面业务和 Go tinad 自动闭环，下一步 P5 接通取消与异常处置。修改项目业务前读 [docs/control-plane.md](docs/control-plane.md)，修改执行接入前读 [docs/tinad.md](docs/tinad.md) 与 [适配契约](docs/engine-adapter-contract.md)。消息规则见 [执行协议](docs/execution-protocol.md)。
+**下一阶段是 H1 = `1.0.0`**。按 [docs/next-implementation-plan.md](docs/next-implementation-plan.md) 迁移：P1–P5 已完成协议、控制面业务、Go tinad 闭环与取消，下一步 P6 收尾启动、界面和数据迁移验收。修改项目业务前读 [docs/control-plane.md](docs/control-plane.md)，修改执行接入前读 [docs/tinad.md](docs/tinad.md) 与 [适配契约](docs/engine-adapter-contract.md)。消息规则见 [执行协议](docs/execution-protocol.md)。
 
 “家节点”和“先装回 Effect”属于旧方案；新实现不引入 Effect。Go tinad 已能承载闭环；P6 将恢复 CLI 的一条命令全栈启动。区分已实现阶段与后续规划。
 

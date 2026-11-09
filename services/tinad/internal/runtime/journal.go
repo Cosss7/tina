@@ -15,13 +15,17 @@ import (
 )
 
 type record struct {
-	CommandID   string      `json:"commandId"`
-	Execution   p.Execution `json:"execution"`
-	Fingerprint string      `json:"fingerprint"`
-	Receipt     p.Receipt   `json:"receipt"`
-	LastSeq     uint64      `json:"lastSeq"`
-	Started     bool        `json:"started"`
-	Result      *p.Result   `json:"result,omitempty"`
+	Kind            string          `json:"kind,omitempty"`
+	Stage           string          `json:"stage,omitempty"`
+	CancelRequested bool            `json:"cancelRequested"`
+	CommandID       string          `json:"commandId"`
+	Execution       p.Execution     `json:"execution"`
+	Fingerprint     string          `json:"fingerprint"`
+	Receipt         p.Receipt       `json:"receipt"`
+	LastSeq         uint64          `json:"lastSeq"`
+	Started         bool            `json:"started"`
+	Result          *p.Result       `json:"result,omitempty"`
+	Cleanup         *p.StopEvidence `json:"cleanup,omitempty"`
 }
 type journal struct {
 	mu sync.Mutex
@@ -66,11 +70,25 @@ func openJournal(filename string) (*journal, error) {
 		db.Close()
 		return nil, fmt.Errorf("database does not belong to tinad")
 	}
-	if _, err := db.Exec(`pragma journal_mode=WAL;
+	if _, err := db.Exec("pragma journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := tx.Exec(`
 create table if not exists command (id text primary key,body text not null);
 create table if not exists outbox (id text primary key,frame blob not null);
 pragma application_id=1414090314;
 pragma user_version=1;`); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -184,6 +202,9 @@ func (j *journal) recover() error {
 		return err
 	}
 	for _, r := range records {
+		if r.Kind == "cancel" && r.Receipt.Admission == p.Accepted {
+			continue
+		}
 		if r.Result != nil || r.Receipt.Admission == p.Rejected {
 			continue
 		}

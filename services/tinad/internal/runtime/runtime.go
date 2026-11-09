@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -30,18 +31,20 @@ type Config struct {
 	Agents        []p.AgentRegistration `json:"agents"`
 }
 type Runtime struct {
-	config       Config
-	registry     *engine.Registry
-	registration p.Register
-	journal      *journal
-	mu           sync.Mutex
-	sessions     map[string]engine.Session
-	active       map[string]bool
-	wake         chan struct{}
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	closed       bool
+	config         Config
+	registry       *engine.Registry
+	registration   p.Register
+	journal        *journal
+	mu             sync.Mutex
+	sessions       map[string]engine.Session
+	active         map[string]bool
+	wake           chan struct{}
+	wg             sync.WaitGroup
+	ctx            context.Context
+	cancel         context.CancelFunc
+	closed         bool
+	cancelTasks    map[string]bool
+	sessionConfigs map[string]p.SessionConfig
 }
 
 func New(config Config, registry *engine.Registry, engines []p.EngineRegistration) (*Runtime, error) {
@@ -85,11 +88,12 @@ func New(config Config, registry *engine.Registry, engines []p.EngineRegistratio
 	lifetime, cancel := context.WithCancel(context.Background())
 	active := map[string]bool{}
 	for _, rec := range records {
-		if rec.Result == nil && rec.Receipt.Admission != p.Rejected {
+		unresolved := rec.Result == nil || (rec.Cleanup != nil && !rec.Cleanup.ConfirmsStop()) || (rec.Cleanup == nil && rec.Result != nil && (rec.Result.Stop == nil || !rec.Result.Stop.ConfirmsStop()))
+		if rec.Kind != "cancel" && unresolved && rec.Receipt.Admission != p.Rejected {
 			active[rec.CommandID] = true
 		}
 	}
-	return &Runtime{config: config, registry: registry, registration: registration, journal: j, sessions: map[string]engine.Session{}, active: active, wake: make(chan struct{}, 1), ctx: lifetime, cancel: cancel}, nil
+	return &Runtime{config: config, registry: registry, registration: registration, journal: j, sessions: map[string]engine.Session{}, active: active, wake: make(chan struct{}, 1), ctx: lifetime, cancel: cancel, cancelTasks: map[string]bool{}, sessionConfigs: map[string]p.SessionConfig{}}, nil
 }
 func (r *Runtime) notify() {
 	select {
@@ -104,6 +108,10 @@ func (r *Runtime) Handle(ctx context.Context, message p.Message) error {
 	switch m := message.(type) {
 	case *p.Dispatch:
 		return r.dispatch(ctx, *m)
+	case *p.Cancel:
+		return r.cancelCommand(*m)
+	case *p.Input:
+		return r.input(ctx, *m)
 	case *p.Ack:
 		if m.NodeID != r.config.NodeID {
 			return fmt.Errorf("ack belongs to another node")
@@ -186,6 +194,14 @@ func (r *Runtime) dispatch(ctx context.Context, d p.Dispatch) error {
 			return err
 		}
 		for _, prior := range records {
+			if prior.Kind == "cancel" {
+				continue
+			}
+			if prior.Execution.SessionID == d.Execution.SessionID && d.Resume == nil {
+				receipt.Admission = p.Rejected
+				receipt.Failure = &p.Failure{Code: "session_exists", Message: "existing logical session requires an explicit native resume handle"}
+				break
+			}
 			if prior.Execution.SessionID == d.Execution.SessionID && prior.Result == nil && prior.Receipt.Admission != p.Rejected {
 				receipt.Admission = p.Rejected
 				receipt.Failure = &p.Failure{Code: "session_busy", Message: "session has an unresolved activity"}
@@ -193,7 +209,7 @@ func (r *Runtime) dispatch(ctx context.Context, d p.Dispatch) error {
 			}
 		}
 	}
-	rec := record{CommandID: d.CommandID, Execution: d.Execution, Fingerprint: string(fingerprint), Receipt: receipt}
+	rec := record{Kind: "dispatch", Stage: "admitted", CommandID: d.CommandID, Execution: d.Execution, Fingerprint: string(fingerprint), Receipt: receipt}
 	// Durably register command identity before engine construction or submission.
 	if err := r.journal.put(rec, receipt); err != nil {
 		return err
@@ -208,13 +224,52 @@ func (r *Runtime) dispatch(ctx context.Context, d p.Dispatch) error {
 	return nil
 }
 func (r *Runtime) execute(ctx context.Context, d p.Dispatch) {
+	r.mu.Lock()
+	initial, _, readErr := r.journal.get(d.CommandID)
+	if readErr != nil || initial.Result != nil {
+		r.mu.Unlock()
+		return
+	}
+	if initial.CancelRequested {
+		r.cancelUnsubmittedLocked(&initial, nil)
+		r.mu.Unlock()
+		return
+	}
+	initial.Stage = "opening"
+	if err := r.journal.put(initial, initial.Receipt); err != nil {
+		r.mu.Unlock()
+		return
+	}
+	cached := r.sessions[d.Execution.SessionID]
+	cachedConfig := r.sessionConfigs[d.Execution.SessionID]
+	r.mu.Unlock()
 	options := engine.OpenOptions{SessionID: d.Execution.SessionID, Config: d.Config}
 	var session engine.Session
 	var err error
-	if d.Resume != nil {
-		session, err = r.registry.Resume(ctx, *d.Resume, options)
+	reused := false
+	if d.Resume != nil && cached != nil && cached.Info().Handle != nil && cached.Info().Handle.NativeID == d.Resume.NativeID && reflect.DeepEqual(cachedConfig, d.Config) {
+		session = cached
+		reused = true
 	} else {
-		session, err = r.registry.Open(ctx, options)
+		if cached != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			proof, closeErr := cached.Close(cleanup)
+			cancel()
+			if closeErr != nil || !proof.ConfirmsStop() {
+				r.refuse(d.CommandID, "cleanup_unproven", engine.ErrUncertain)
+				return
+			}
+			r.mu.Lock()
+			r.publishReleaseLocked(cached, proof)
+			delete(r.sessions, d.Execution.SessionID)
+			delete(r.sessionConfigs, d.Execution.SessionID)
+			r.mu.Unlock()
+		}
+		if d.Resume != nil {
+			session, err = r.registry.Resume(ctx, *d.Resume, options)
+		} else {
+			session, err = r.registry.Open(ctx, options)
+		}
 	}
 	if err != nil {
 		r.refuse(d.CommandID, "engine_open", err)
@@ -229,9 +284,28 @@ func (r *Runtime) execute(ctx context.Context, d p.Dispatch) {
 		return
 	}
 	r.sessions[d.Execution.SessionID] = session
+	r.sessionConfigs[d.Execution.SessionID] = d.Config
 	rec, _, err := r.journal.get(d.CommandID)
 	if err == nil {
 		rec.Receipt.InstanceID = session.Info().InstanceID
+	}
+	if err == nil && rec.CancelRequested {
+		r.mu.Unlock()
+		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		proof, closeErr := session.Close(cleanup)
+		cancel()
+		r.mu.Lock()
+		if closeErr == nil && proof.ConfirmsStop() {
+			r.cancelUnsubmittedLocked(&rec, &proof)
+			delete(r.sessions, d.Execution.SessionID)
+			delete(r.sessionConfigs, d.Execution.SessionID)
+		}
+		r.mu.Unlock()
+		return
+	}
+	if err == nil {
+		rec.Receipt.InstanceID = session.Info().InstanceID
+		rec.Stage = "submitting"
 		err = r.journal.put(rec, rec.Receipt)
 	}
 	r.mu.Unlock()
@@ -239,8 +313,10 @@ func (r *Runtime) execute(ctx context.Context, d p.Dispatch) {
 		log.Printf("persist execution identity: %v", err)
 		return
 	}
-	r.wg.Add(1)
-	go func() { defer r.wg.Done(); r.collect(session) }()
+	if !reused {
+		r.wg.Add(1)
+		go func() { defer r.wg.Done(); r.collect(session) }()
+	}
 	receipt, submitErr := session.Submit(ctx, p.Input{CommandID: d.CommandID, Execution: d.Execution, InstanceID: session.Info().InstanceID, Text: d.Input})
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -251,6 +327,9 @@ func (r *Runtime) execute(ctx context.Context, d p.Dispatch) {
 	}
 	if submitErr != nil {
 		receipt = p.Receipt{CommandID: d.CommandID, Execution: d.Execution, InstanceID: session.Info().InstanceID, Admission: p.Unknown, Failure: &p.Failure{Code: "submission_unknown", Message: submitErr.Error()}}
+		if errors.Is(submitErr, engine.ErrClosed) || errors.Is(submitErr, engine.ErrConflict) || errors.Is(submitErr, engine.ErrUnsupported) {
+			receipt.Admission = p.Rejected
+		}
 	}
 	// A fast terminal event may have already settled this command.
 	if rec.Result == nil {
@@ -272,6 +351,10 @@ func (r *Runtime) refuse(commandID, code string, cause error) {
 	rec.Receipt.Admission = p.Rejected
 	if errors.Is(cause, engine.ErrUncertain) {
 		rec.Receipt.Admission = p.Unknown
+	}
+	if rec.CancelRequested && rec.Receipt.Admission == p.Rejected {
+		r.cancelUnsubmittedLocked(&rec, nil)
+		return
 	}
 	rec.Receipt.Failure = &p.Failure{Code: code, Message: cause.Error()}
 	if err := r.journal.put(rec, rec.Receipt); err != nil {
@@ -339,6 +422,18 @@ func (r *Runtime) collect(session engine.Session) {
 		}
 		r.notify()
 		if update.Result != nil {
+			if update.Result.State == p.Cancelled && update.Result.Stop != nil && update.Result.Stop.SessionUsable {
+				r.mu.Lock()
+				keep := len(r.sessions) <= r.config.MaxConcurrent
+				if keep {
+					delete(r.active, commandID)
+				}
+				r.mu.Unlock()
+				if keep {
+					r.notify()
+					continue
+				}
+			}
 			closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			proof, closeErr := session.Close(closeCtx)
 			cancel()
@@ -351,14 +446,20 @@ func (r *Runtime) collect(session engine.Session) {
 				}
 			}
 			event := p.Event{Execution: update.Result.Execution, InstanceID: update.Result.InstanceID, CommandID: commandID, Seq: update.Result.Seq + 1, OccurredAt: time.Now().UTC(), Kind: p.StopReported, Stop: &proof}
-			if err := event.Validate(); err == nil {
-				if err := r.journal.enqueue(event); err != nil {
+			r.mu.Lock()
+			if latest, ok, err := r.journal.get(commandID); err == nil && ok {
+				event.Seq = latest.LastSeq + 1
+				latest.LastSeq = event.Seq
+				latest.Cleanup = &proof
+				if err := r.journal.put(latest, event); err != nil {
 					log.Printf("persist cleanup: %v", err)
 				}
 			}
-			r.mu.Lock()
 			if proof.ConfirmsStop() {
-				delete(r.sessions, session.Info().SessionID)
+				if current := r.sessions[session.Info().SessionID]; current != nil && current.Info().InstanceID == session.Info().InstanceID {
+					delete(r.sessions, session.Info().SessionID)
+					delete(r.sessionConfigs, session.Info().SessionID)
+				}
 				delete(r.active, commandID)
 			}
 			r.mu.Unlock()
@@ -372,7 +473,7 @@ func (r *Runtime) collect(session engine.Session) {
 		return
 	}
 	for _, rec := range records {
-		if rec.Execution.SessionID == session.Info().SessionID && rec.Result == nil && rec.Receipt.Admission != p.Rejected {
+		if rec.Kind != "cancel" && rec.Execution.SessionID == session.Info().SessionID && rec.Receipt.InstanceID == session.Info().InstanceID && rec.Result == nil && rec.Receipt.Admission != p.Rejected {
 			rec.Receipt.Admission = p.Unknown
 			rec.Receipt.Failure = &p.Failure{Code: "stream_closed", Message: "engine stream closed without a proven terminal result"}
 			if err := r.journal.put(rec, rec.Receipt); err != nil {
@@ -399,6 +500,35 @@ func (r *Runtime) reconcile(request p.ReconcileRequest) error {
 		requested[cursor.Execution] = true
 	}
 	for _, rec := range records {
+		if rec.Kind == "cancel" {
+			continue
+		}
+		if rec.Result != nil && (rec.Cleanup == nil || !rec.Cleanup.ConfirmsStop()) && (rec.Result.Stop == nil || !rec.Result.Stop.ConfirmsStop()) {
+			if session := r.sessions[rec.Execution.SessionID]; session != nil && session.Info().InstanceID == rec.Receipt.InstanceID {
+				cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+				proof, closeErr := session.Close(cleanup)
+				cancel()
+				if closeErr != nil {
+					proof.Detail = closeErr.Error()
+				}
+				if proof.Mode == "" {
+					proof.Mode = p.InterruptProcess
+					proof.Root = p.ExitUnproven
+					proof.Workload = p.ExitUnproven
+				}
+				rec.LastSeq++
+				rec.Cleanup = &proof
+				event := p.Event{Execution: rec.Execution, InstanceID: rec.Receipt.InstanceID, CommandID: rec.CommandID, Seq: rec.LastSeq, OccurredAt: time.Now().UTC(), Kind: p.StopReported, Stop: &proof}
+				if err := r.journal.put(rec, event); err != nil {
+					return err
+				}
+				if proof.ConfirmsStop() {
+					delete(r.sessions, rec.Execution.SessionID)
+					delete(r.sessionConfigs, rec.Execution.SessionID)
+					delete(r.active, rec.CommandID)
+				}
+			}
+		}
 		if !requested[rec.Execution] && (rec.Result != nil || rec.Receipt.Admission == p.Rejected) {
 			continue
 		}
@@ -407,7 +537,7 @@ func (r *Runtime) reconcile(request p.ReconcileRequest) error {
 			observation.State = string(rec.Result.State)
 			observation.LastSeq = rec.Result.Seq
 			observation.InstanceID = rec.Result.InstanceID
-		} else if r.active[rec.CommandID] && rec.Started && r.sessions[rec.Execution.SessionID] != nil {
+		} else if r.active[rec.CommandID] && rec.Started && r.sessions[rec.Execution.SessionID] != nil && !r.sessions[rec.Execution.SessionID].Info().Uncertain {
 			observation.State = "running"
 		}
 		response.Observations = append(response.Observations, observation)
@@ -432,12 +562,59 @@ func (r *Runtime) Close() error {
 	}
 	r.mu.Unlock()
 	var problems []error
+	type released struct {
+		session engine.Session
+		proof   p.StopEvidence
+	}
+	proofs := []released{}
 	for _, s := range sessions {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, err := s.Close(ctx)
+		proof, err := s.Close(ctx)
+		proofs = append(proofs, released{s, proof})
 		cancel()
 		problems = append(problems, err)
 	}
 	r.wg.Wait()
+	r.mu.Lock()
+	for _, entry := range proofs {
+		if entry.proof.Validate() == nil {
+			r.publishReleaseLocked(entry.session, entry.proof)
+		}
+	}
+	r.mu.Unlock()
 	return errors.Join(append(problems, r.journal.db.Close())...)
+}
+
+// Caller holds mu. Releasing an idle native runtime gets its own fact and cannot
+// rewrite the original result or steal a sequence from a later active turn.
+func (r *Runtime) publishReleaseLocked(session engine.Session, proof p.StopEvidence) {
+	records, err := r.journal.all()
+	if err != nil {
+		return
+	}
+	var latest *record
+	var maxSeq uint64
+	for _, rec := range records {
+		if rec.Kind == "cancel" || rec.Receipt.InstanceID != session.Info().InstanceID {
+			continue
+		}
+		if rec.Result == nil && rec.Receipt.Admission != p.Rejected {
+			return
+		}
+		if rec.LastSeq > maxSeq {
+			maxSeq = rec.LastSeq
+			copy := rec
+			latest = &copy
+		}
+	}
+	if latest == nil || (latest.Cleanup != nil && latest.Cleanup.ConfirmsStop() && !latest.Cleanup.SessionUsable) {
+		return
+	}
+	latest.LastSeq = maxSeq + 1
+	latest.Cleanup = &proof
+	event := p.Event{Execution: latest.Execution, CommandID: latest.CommandID, InstanceID: session.Info().InstanceID, Seq: latest.LastSeq, OccurredAt: time.Now().UTC(), Kind: p.StopReported, Stop: &proof}
+	if err := r.journal.put(*latest, event); err != nil {
+		log.Printf("persist runtime release: %v", err)
+	}
+	r.notify()
 }
