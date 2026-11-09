@@ -6,7 +6,7 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 
 **H0 已完成**，产出 `0.1.0`：单机跑通"建卡 → Router 拆卡 → 派 worker → 收报告 → 人终审"，真 dsh 手工验收通过。结果与遗留问题见 `docs/h0-report.md`。
 
-**下一阶段是 H1 = `1.0.0`**。先按 [docs/next-implementation-plan.md](docs/next-implementation-plan.md) 从 P1 开始迁移：控制面维护项目权威数据，Go `tinad` 管理执行，普通适配器用 Go 内部模块。适配、取消与恢复行为见 [docs/engine-adapter-contract.md](docs/engine-adapter-contract.md)。
+**下一阶段是 H1 = `1.0.0`**。按 [docs/next-implementation-plan.md](docs/next-implementation-plan.md) 迁移：P1 的 Go 消息、适配接口和离线 fake 已完成，下一步 P2 将项目存储与业务移到控制面。协议字段和状态规则见 [docs/execution-protocol.md](docs/execution-protocol.md)；适配、取消与恢复行为见 [docs/engine-adapter-contract.md](docs/engine-adapter-contract.md)。
 
 “家节点”和“先装回 Effect”属于旧方案；新实现不引入 Effect。H0 代码尚未完成架构迁移，不能将目标文档视为当前功能已实现。
 
@@ -21,8 +21,8 @@ apps/web                 React 前端（Web 与桌面共用）
 apps/desktop             Electron 外壳（H0 不做）
 apps/cli                 tina 命令（up / attach）
 services/control-plane   Go 控制面
-services/tinad           Go 执行服务与普通适配器（待按计划建立）
-packages/protocol        共享执行协议（P1 建立，线格式与生成工具按实施定义）
+services/tinad           Go 适配接口、注册表和 fake（服务接线与真实引擎待迁移）
+packages/protocol        共享 Go 执行消息、JSON v1 编解码和校验
 packages/node-runtime    H0 TS 节点（业务与执行职责待迁移）
 packages/engine-port     H0 引擎接口与 TCP 传输
 packages/engine-dsh      H0 进程外 TS 适配器（内部插件尚未实现）

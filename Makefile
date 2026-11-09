@@ -1,4 +1,4 @@
-# H0 的验证入口与构建。离线可跑：不联网、不调真实模型，引擎一律用 fake。
+# H0 启动链路与 P1 Go 契约的验证入口。离线可跑，不调真实模型。
 # 依赖先装一次：pnpm install（Go 模块第一次 build 时拉）。
 #
 # USERPROFILE / LOCALAPPDATA 是给 Windows 版 go.exe 补的：make 的配方环境里没有
@@ -37,6 +37,8 @@ typecheck:
 
 test:
 	go -C services/control-plane test ./...
+	go -C packages/protocol test ./...
+	go -C services/tinad test ./...
 	node --test
 
 up: build

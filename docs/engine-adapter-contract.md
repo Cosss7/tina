@@ -1,6 +1,6 @@
 # 引擎适配契约
 
-> 修订 2 · 2026-11-09 · 目标契约，尚未实现；tinad 与普通适配器选用 Go
+> 修订 3 · 2026-11-09 · Go 接口、注册表与 fake 验证已落地；真实 dsh 与进程监管待迁移
 > 实现或修改 tinad 的引擎适配、会话管理、取消与恢复时读取本文。
 > 架构边界见 [vision.md](vision.md)，迁移步骤与整体验收见 [实施计划](next-implementation-plan.md)。
 
@@ -71,7 +71,7 @@ flowchart TB
 
 ## 4. 最小操作与可选能力
 
-操作名用于描述语义，具体函数签名和线格式在实施时确定。
+操作名用于描述语义；P1 的 Go 签名位于 `services/tinad/internal/engine`，线格式与状态规则见 [执行协议 v1](execution-protocol.md)。
 
 | 操作 | 约定 |
 |---|---|
