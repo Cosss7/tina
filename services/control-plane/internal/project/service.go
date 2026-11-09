@@ -51,7 +51,12 @@ func (s *Service) SeedDemo(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) ConfigureAgent(ctx context.Context, projectID, agentID, name, engineID, nodeID, cwd, actor string) (Agent, error) {
+type EngineSelection struct {
+	Model   string
+	Options map[string]json.RawMessage
+}
+
+func (s *Service) ConfigureAgent(ctx context.Context, projectID, agentID, name, engineID, nodeID, cwd, actor string, selection ...EngineSelection) (Agent, error) {
 	var agent Agent
 	if strings.TrimSpace(name) == "" || strings.TrimSpace(engineID) == "" || strings.TrimSpace(cwd) == "" {
 		return agent, problem("invalid_argument", "name, engineId and cwd are required")
@@ -70,6 +75,9 @@ func (s *Service) ConfigureAgent(ctx context.Context, projectID, agentID, name, 
 			return problem("conflict", "Agent has a dispatched or running request; reconcile it before changing execution configuration")
 		}
 		agent.Name, agent.EngineID, agent.NodeID, agent.Cwd = name, engineID, nodeID, cwd
+		if len(selection) > 0 {
+			agent.Model, agent.Options = selection[0].Model, selection[0].Options
+		}
 		if err := save(ctx, tx, "update agent set body=?2 where id=?1", agent, agent.ID); err != nil {
 			return err
 		}

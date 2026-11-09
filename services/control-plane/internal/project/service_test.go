@@ -458,3 +458,20 @@ func TestReportIdentityCannotBeProvidedByModel(t *testing.T) {
 		t.Fatal("model controlled authoritative metadata", r)
 	}
 }
+
+func TestNativeFailurePreservesAnAlreadyValidWorkerReport(t *testing.T) {
+	s := openTest(t, ":memory:")
+	task := planned(t, s, "p")
+	q, err := s.Dispatch(testCtx, "p", task.ID, "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordOutcome(testCtx, q.Run.ID, goodReport, "native execution failed after reporting"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Board(testCtx, "p")
+	card := b.Cards[1]
+	if card.Runs[0].State != "failed" || card.LatestReport.Generated || card.LatestReport.Summary != "实现完成" {
+		t.Fatal("valid report was replaced with fallback", card)
+	}
+}

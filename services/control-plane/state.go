@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	p "github.com/Cosss7/tina/packages/protocol"
 )
 
 const offlineAfter = 3 * time.Second
@@ -13,14 +15,18 @@ type Node struct {
 	LastSeenAt        time.Time
 	Online            bool
 	generation        uint64
+	Registration      *p.Register
 }
 type Hub struct {
 	mu    sync.Mutex
 	nodes map[string]*Node
 	now   func() time.Time
+	peers map[string]*executionPeer
 }
 
-func NewHub() *Hub { return &Hub{nodes: map[string]*Node{}, now: time.Now} }
+func NewHub() *Hub {
+	return &Hub{nodes: map[string]*Node{}, peers: map[string]*executionPeer{}, now: time.Now}
+}
 func (h *Hub) Register(id, name, version string) uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -68,11 +74,14 @@ type Snapshot struct {
 	Nodes   []NodeView `json:"nodes"`
 }
 type NodeView struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Version    string    `json:"version"`
-	Online     bool      `json:"online"`
-	LastSeenAt time.Time `json:"lastSeenAt"`
+	ID         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	Version    string                 `json:"version"`
+	Online     bool                   `json:"online"`
+	LastSeenAt time.Time              `json:"lastSeenAt"`
+	Ready      bool                   `json:"ready"`
+	Agents     []p.AgentRegistration  `json:"agents"`
+	Engines    []p.EngineRegistration `json:"engines"`
 }
 
 func (h *Hub) Snapshot() Snapshot {
@@ -80,7 +89,13 @@ func (h *Hub) Snapshot() Snapshot {
 	defer h.mu.Unlock()
 	s := Snapshot{Version: version, Now: h.now(), Nodes: []NodeView{}}
 	for _, n := range h.nodes {
-		s.Nodes = append(s.Nodes, NodeView{ID: n.ID, Name: n.Name, Version: n.Version, Online: n.Online, LastSeenAt: n.LastSeenAt})
+		view := NodeView{ID: n.ID, Name: n.Name, Version: n.Version, Online: n.Online, LastSeenAt: n.LastSeenAt, Agents: []p.AgentRegistration{}, Engines: []p.EngineRegistration{}}
+		if n.Registration != nil {
+			view.Agents = n.Registration.Agents
+			view.Engines = n.Registration.Engines
+		}
+		view.Ready = n.Online && h.peers[n.ID] != nil
+		s.Nodes = append(s.Nodes, view)
 	}
 	sort.Slice(s.Nodes, func(i, j int) bool { return s.Nodes[i].ID < s.Nodes[j].ID })
 	return s

@@ -3,7 +3,7 @@
 > P3 · 2026-11-09 · Go 执行服务、适配器、进程监管与持久回传日志已落地。
 > 配置或修改 tinad 的接入、引擎和本机权限时读取本文；消息规则见 [执行协议](execution-protocol.md)。
 
-tinad 只执行已授权的 Agent 请求，不持有项目业务库。Go 二进制由 `make build` 生成；独立启动使用 `.build/tinad -config <本机配置文件>`，Windows 文件名为 tinad.exe。P4 接通控制面，P6 将其纳入一条命令启动。
+tinad 只执行已授权的 Agent 请求，不持有项目业务库。Go 二进制由 `make build` 生成；独立启动使用 `.build/tinad -config <本机配置文件>`，Windows 文件名为 tinad.exe。P4 已接通 `/ws/tinad` 与自动派发，P6 将其纳入一条命令启动。
 
 配置包含 nodeId、name、url（ws/wss 执行端点）、私有 token、database、maxConcurrent、roots，以及本机允许的 agents（id/projectId/role/engineId）。token 只出现在本机私有配置及握手 Authorization 头中，不进入注册消息或普通日志。根目录经过真实路径解析；请求中的工作目录必须处于授权根目录内，Agent、项目及引擎的绑定也必须匹配本机清单。
 

@@ -63,104 +63,116 @@ func validatePlan(plan Plan) error {
 // deduplication before calling this method; request timeouts must never call it.
 func (s *Service) RecordOutcome(ctx context.Context, runID, output, executionFailure string) error {
 	return s.change(ctx, func(tx *sql.Tx) error {
-		run, err := one[Run](ctx, tx, "select body from run where id=?", runID)
-		if err != nil {
-			return err
-		}
-		if terminal(run.State) {
-			return nil
-		}
-		task, err := requireTask(ctx, tx, run.ProjectID, run.TaskID)
-		if err != nil {
-			return err
-		}
-		report := Report{ID: id("report"), RunID: runID, State: "done", Summary: "", Decisions: []string{}, Artifacts: []json.RawMessage{}, Blockers: []string{}, Usage: map[string]any{}}
-		var plan Plan
-		if executionFailure == "" {
-			if run.Purpose == "plan" {
-				err = modelObject(output, &plan)
-				if err == nil {
-					err = validatePlan(plan)
-				}
-				if err == nil {
-					report.Summary = plan.Summary
-				}
-			} else {
-				// Decode into a separate model payload: engines cannot choose record IDs
-				// or claim a generated fallback report came from the control plane.
-				var raw struct {
-					State     string            `json:"state"`
-					Summary   string            `json:"summary"`
-					Decisions []string          `json:"decisions"`
-					Artifacts []json.RawMessage `json:"artifacts"`
-					Blockers  []string          `json:"blockers"`
-					Usage     map[string]any    `json:"usage"`
-				}
-				err = modelObject(output, &raw)
-				if err == nil && (strings.TrimSpace(raw.Summary) == "" || (raw.State != "done" && raw.State != "blocked" && raw.State != "failed")) {
-					err = fmt.Errorf("Invalid worker report state or summary")
-				}
-				if err == nil {
-					report.State, report.Summary = raw.State, raw.Summary
-					if raw.Decisions != nil {
-						report.Decisions = raw.Decisions
-					}
-					if raw.Artifacts != nil {
-						report.Artifacts = raw.Artifacts
-					}
-					if raw.Blockers != nil {
-						report.Blockers = raw.Blockers
-					}
-					if raw.Usage != nil {
-						report.Usage = raw.Usage
-					}
-				}
-			}
-			if err != nil {
-				executionFailure = err.Error()
-			}
-		}
-		run.State = "completed"
-		if executionFailure != "" {
-			run.State = "failed"
-			run.Error = &executionFailure
-			report.State, report.Summary, report.Generated = "failed", "Run failed: "+executionFailure, true
-		} else if run.Purpose == "plan" {
-			payload := planPayload{Plan: plan}
-			payload.Task.ID, payload.Task.Title = task.ID, task.Title
-			body, err := json.Marshal(payload)
-			if err != nil {
-				return err
-			}
-			a := Approval{ID: id("approval"), ProjectID: run.ProjectID, TaskID: task.ID, Kind: "plan", State: "pending", Payload: body, RequestedAt: now()}
-			if err := insertApproval(ctx, tx, a); err != nil {
-				return err
-			}
-			if err := emit(ctx, tx, run.ProjectID, "plan.requested", run.AgentID, a); err != nil {
-				return err
-			}
-		}
-		ended := now()
-		run.EndedAt = &ended
-		if err := save(ctx, tx, "insert into report(id,run_id,body) values(?,?,?)", report, report.ID, runID); err != nil {
-			return err
-		}
-		if err := save(ctx, tx, "update run set state=?1,body=?3 where id=?2", run, run.State, run.ID); err != nil {
-			return err
-		}
-		job, err := one[Job](ctx, tx, "select body from execution_request where run_id=?", runID)
-		if err != nil {
-			return err
-		}
-		job.State = "settled"
-		if err := save(ctx, tx, "update execution_request set state=?1,body=?3 where command_id=?2", job, job.State, job.CommandID); err != nil {
-			return err
-		}
-		if err := emit(ctx, tx, run.ProjectID, "run."+run.State, run.AgentID, run); err != nil {
-			return err
-		}
-		return refresh(ctx, tx, &task)
+		return recordOutcome(ctx, tx, runID, output, executionFailure)
 	})
+}
+func recordOutcome(ctx context.Context, tx *sql.Tx, runID, output, executionFailure string, forcedState ...string) error {
+	run, err := one[Run](ctx, tx, "select body from run where id=?", runID)
+	if err != nil {
+		return err
+	}
+	if terminal(run.State) {
+		return nil
+	}
+	task, err := requireTask(ctx, tx, run.ProjectID, run.TaskID)
+	if err != nil {
+		return err
+	}
+	report := Report{ID: id("report"), RunID: runID, State: "done", Summary: "", Decisions: []string{}, Artifacts: []json.RawMessage{}, Blockers: []string{}, Usage: map[string]any{}}
+	var plan Plan
+	if executionFailure == "" || run.Purpose != "plan" {
+		if run.Purpose == "plan" {
+			err = modelObject(output, &plan)
+			if err == nil {
+				err = validatePlan(plan)
+			}
+			if err == nil {
+				report.Summary = plan.Summary
+			}
+		} else {
+			// Decode into a separate model payload: engines cannot choose record IDs
+			// or claim a generated fallback report came from the control plane.
+			var raw struct {
+				State     string            `json:"state"`
+				Summary   string            `json:"summary"`
+				Decisions []string          `json:"decisions"`
+				Artifacts []json.RawMessage `json:"artifacts"`
+				Blockers  []string          `json:"blockers"`
+				Usage     map[string]any    `json:"usage"`
+			}
+			err = modelObject(output, &raw)
+			if err == nil && (strings.TrimSpace(raw.Summary) == "" || (raw.State != "done" && raw.State != "blocked" && raw.State != "failed")) {
+				err = fmt.Errorf("Invalid worker report state or summary")
+			}
+			if err == nil {
+				report.State, report.Summary = raw.State, raw.Summary
+				if raw.Decisions != nil {
+					report.Decisions = raw.Decisions
+				}
+				if raw.Artifacts != nil {
+					report.Artifacts = raw.Artifacts
+				}
+				if raw.Blockers != nil {
+					report.Blockers = raw.Blockers
+				}
+				if raw.Usage != nil {
+					report.Usage = raw.Usage
+				}
+			}
+		}
+		if err != nil && executionFailure == "" {
+			executionFailure = err.Error()
+		}
+	}
+	validWorkerReport := run.Purpose != "plan" && err == nil && report.Summary != ""
+	run.State = "completed"
+	if executionFailure != "" {
+		run.State = "failed"
+		run.Error = &executionFailure
+		if !validWorkerReport {
+			report.State, report.Summary, report.Generated = "failed", "Run failed: "+executionFailure, true
+		}
+		if len(forcedState) > 0 && forcedState[0] == "cancelled" {
+			run.State = "cancelled"
+			if !validWorkerReport {
+				report.Summary = "Run cancelled: " + executionFailure
+			}
+		}
+	} else if run.Purpose == "plan" {
+		payload := planPayload{Plan: plan}
+		payload.Task.ID, payload.Task.Title = task.ID, task.Title
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		a := Approval{ID: id("approval"), ProjectID: run.ProjectID, TaskID: task.ID, Kind: "plan", State: "pending", Payload: body, RequestedAt: now()}
+		if err := insertApproval(ctx, tx, a); err != nil {
+			return err
+		}
+		if err := emit(ctx, tx, run.ProjectID, "plan.requested", run.AgentID, a); err != nil {
+			return err
+		}
+	}
+	ended := now()
+	run.EndedAt = &ended
+	if err := save(ctx, tx, "insert into report(id,run_id,body) values(?,?,?)", report, report.ID, runID); err != nil {
+		return err
+	}
+	if err := save(ctx, tx, "update run set state=?1,body=?3 where id=?2", run, run.State, run.ID); err != nil {
+		return err
+	}
+	job, err := one[Job](ctx, tx, "select body from execution_request where run_id=?", runID)
+	if err != nil {
+		return err
+	}
+	job.State = "settled"
+	if err := save(ctx, tx, "update execution_request set state=?1,body=?3 where command_id=?2", job, job.State, job.CommandID); err != nil {
+		return err
+	}
+	if err := emit(ctx, tx, run.ProjectID, "run."+run.State, run.AgentID, run); err != nil {
+		return err
+	}
+	return refresh(ctx, tx, &task)
 }
 
 func prompt(task Task, purpose string) string {

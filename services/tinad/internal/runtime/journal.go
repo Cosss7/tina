@@ -20,6 +20,7 @@ type record struct {
 	Fingerprint string      `json:"fingerprint"`
 	Receipt     p.Receipt   `json:"receipt"`
 	LastSeq     uint64      `json:"lastSeq"`
+	Started     bool        `json:"started"`
 	Result      *p.Result   `json:"result,omitempty"`
 }
 type journal struct {

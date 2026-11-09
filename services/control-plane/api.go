@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,12 +19,27 @@ type API struct {
 
 func newHandler(projects *project.Service, hub *Hub, static fs.FS) http.Handler {
 	a := &API{projects: projects, hub: hub}
+	if registrations, err := projects.Registrations(context.Background()); err == nil {
+		for _, registration := range registrations {
+			copy := registration
+			hub.mu.Lock()
+			if hub.nodes[copy.NodeID] == nil {
+				hub.nodes[copy.NodeID] = &Node{ID: copy.NodeID, Name: copy.Name, Version: copy.Version, Registration: &copy}
+			}
+			hub.mu.Unlock()
+		}
+	} else {
+		log.Printf("Restore node directory: %v", err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": true, "version": version})
 	})
 	mux.HandleFunc("GET /api/state", a.state)
 	mux.HandleFunc("GET /ws/node", hub.ServeNodeWS)
+	mux.HandleFunc("GET /ws/tinad", a.serveExecution)
+	mux.HandleFunc("POST /api/nodes/enroll", a.enrollNode)
+	mux.HandleFunc("PUT /api/projects/{id}/memory", a.routerMemory)
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("GET /api/projects/{id}/agents", func(w http.ResponseWriter, r *http.Request) {
 		v, err := projects.Agents(r.Context(), r.PathValue("id"))
@@ -74,7 +90,15 @@ func (a *API) configureAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := a.projects.ConfigureAgent(r.Context(), r.PathValue("id"), r.PathValue("agent"), stringField(body, "name"), stringField(body, "engineId"), stringField(body, "nodeId"), stringField(body, "cwd"), "human:local")
+	selection := project.EngineSelection{Model: stringField(body, "model")}
+	if options, exists := body["options"]; exists && options != nil {
+		raw, err := json.Marshal(options)
+		if err != nil || json.Unmarshal(raw, &selection.Options) != nil {
+			writeError(w, 400, "invalid_argument", "options must be a JSON object")
+			return
+		}
+	}
+	v, err := a.projects.ConfigureAgent(r.Context(), r.PathValue("id"), r.PathValue("agent"), stringField(body, "name"), stringField(body, "engineId"), stringField(body, "nodeId"), stringField(body, "cwd"), "human:local", selection)
 	a.reply(w, v, err, 200)
 }
 func (a *API) createCard(w http.ResponseWriter, r *http.Request) {

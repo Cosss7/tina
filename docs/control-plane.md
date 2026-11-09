@@ -1,13 +1,13 @@
 # 控制面项目服务
 
-> P2 · 2026-11-09 · 已迁移项目数据和确定性业务规则，执行请求持久排队。
+> P4 · 2026-11-09 · 项目业务、持久派发与执行事实接收已接通。
 > 修改项目 API、数据库、审批、报告或队列时读取本文；总体边界见 [架构](architecture.md)。
 
 ## 当前可用范围
 
 只启动 Go 控制面就能创建项目、创建需求卡、查看看板与历史报告、处理已存在的计划审批和终审。Router/Worker 配置与执行位置绑定由控制面保存，节点离线不影响这些项目操作。
 
-请求拆卡或派活会创建 Run 和待执行记录，返回 HTTP 202。P2 尚未把队列连到执行引擎，因此新请求保持 queued；Go tinad 连接与实际执行在 P3/P4 接通。当前不能用新的启动入口完成自动拆卡和自动报告闭环。原 TS 服务的隔离测试仍作为 H0 行为基线，不再承载新项目 API。
+请求拆卡或派活会创建 Run 和待执行记录，返回 HTTP 202。已绑定且在线的 Go tinad 自动接受派发，控制面接收计划/报告并维护审批与终审。没有可用执行位置时保持 queued。原 TS 服务的隔离测试仍作为 H0 行为基线，不再承载新项目 API。
 
 ## 启动与数据路径
 
@@ -38,7 +38,9 @@ node apps/cli/src/main.ts up --addr 127.0.0.1:7801 --db .tina/control-plane.db
 
 建卡、排队、审批创建子卡、报告落库与终审均在事务中追加产品事件；任何一步失败都会回滚业务变更和事件。事件序号按项目从 1 连续追加。看板使用一致的只读事务，不在 GET 请求中偷偷重算并写入状态。
 
-待执行记录保存稳定 commandId、Run/Agent 关联与完整提示词；Run 同时保存 sessionId/activityId。重启保留原记录与 ID，已派发或运行中的 Run 不被重置为 queued。命令的网络发送、未知投递、回传日志与重连对账仍由 P3–P5 实现。
+待执行记录保存稳定 commandId、Run/Agent 关联与完整提示词；Run 同时保存 sessionId/activityId。派发前冻结完整 dispatch 并标为 dispatched，发送失败不自动重排。回传按稳定消息 ID 和实例序号去重，业务结果、执行事实与产品事件同事务提交之后才 ack。重启保留原记录与 ID；已派发/运行的尝试先对账，未知结果保持待核查，不自动重跑。P5 增加取消和异常处置入口。
+
+节点先在控制面主机通过 `POST /api/nodes/enroll` 登记 `{nodeId,name,token}`，同 ID 的不同 token 不可覆盖。控制面只保存 token 的 SHA-256 摘要。tinad 在 `/ws/tinad` 握手时携带 Authorization 和 X-Tina-Node，随后注册的 Agent 必须与控制面已有项目、角色、引擎及节点绑定一致。注册不创建项目，也不改变绑定。Web 状态中 ready 表示已通过执行接线的节点，旧 H0 心跳的 online 不代表可以派发。
 
 ## 业务规则
 
@@ -48,7 +50,7 @@ node apps/cli/src/main.ts up --addr 127.0.0.1:7801 --db .tina/control-plane.db
 - 有终态报告的任务进入评审中；blocked 报告仍待人判断，不能仅因 blocked 自动判为执行失败。无有效报告的确定性执行失败生成醒目标记的兜底报告。
 - 人终审针对最近一次已结束尝试的报告，运行中不能终审旧报告。状态推导保留已有 manualOverride 数据。模型输出不能指定权威报告 ID、Run ID 或 generated 标记。
 
-`RecordOutcome` 是供后续执行接线使用的内部业务入口，测试用它注入已经观测到的结果。没有对应的公共 HTTP 接口；P4 必须先校验执行身份、终态证据及消息去重，再调用它。等待超时或断连不能调用它制造失败或取消终态。当前仍沿用 H0 的单账号 `human:local` 操作者，完整多用户权限不在 P2 范围内。
+`RecordOutcome` 是内部业务入口，没有对应的公共 HTTP 接口。执行接线先校验节点、命令、Run、会话、活动、实例和终态证据，再在去重事务中更新业务。等待超时或断连不能制造失败或取消终态。已有有效 Worker 报告不因引擎随后失败被兜底文本覆盖；原生用量单独保存在 engineUsage 中。当前仍沿用 H0 的单账号 `human:local` 操作者，完整多用户权限不在本次迁移范围内。
 
 ## HTTP 入口与验证
 
@@ -56,8 +58,10 @@ node apps/cli/src/main.ts up --addr 127.0.0.1:7801 --db .tina/control-plane.db
 |---|---|
 | `GET /api/state` | 控制面的项目目录与独立的节点可用性；不再返回 homeNodeId 或“项目在线” |
 | `POST /api/projects` | `{name}` 创建项目及默认 Router/Worker 配置 |
+| `PUT /api/projects/{id}/memory` | `{text}` 更新 Router 显式记忆，派发 Router 时与项目事实一起提供 |
+| `POST /api/nodes/enroll` | 本机管理入口，预登记节点身份及 token |
 | `GET /api/projects/{id}/agents` | 读取项目 Agent 配置 |
-| `PUT /api/projects/{id}/agents/{agent}` | `{name,engineId,nodeId,cwd}` 修改已有 Agent 的配置/绑定 |
+| `PUT /api/projects/{id}/agents/{agent}` | `{name,engineId,nodeId,cwd,model?,options?}` 修改已有 Agent 的配置/绑定 |
 | `GET /api/board?project=...` | 持久看板、历史 Run/报告与待批计划 |
 | `POST /api/cards` | `{projectId,title,description?}` 创建需求卡 |
 | `POST /api/plans` | `{projectId,taskId}` 排队 Router Run，202 返回 `{run,task}` |

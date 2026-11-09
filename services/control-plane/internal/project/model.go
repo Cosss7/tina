@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	p "github.com/Cosss7/tina/packages/protocol"
 )
 
 type Error struct{ Code, Message string }
@@ -14,19 +16,22 @@ func (e *Error) Error() string           { return e.Message }
 func problem(code, message string) error { return &Error{code, message} }
 
 type Project struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"createdAt"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	CreatedAt    string `json:"createdAt"`
+	RouterMemory string `json:"routerMemory,omitempty"`
 }
 
 type Agent struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"projectId"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	EngineID  string `json:"engineId"`
-	NodeID    string `json:"nodeId"`
-	Cwd       string `json:"cwd"`
+	ID        string                     `json:"id"`
+	ProjectID string                     `json:"projectId"`
+	Name      string                     `json:"name"`
+	Role      string                     `json:"role"`
+	EngineID  string                     `json:"engineId"`
+	NodeID    string                     `json:"nodeId"`
+	Cwd       string                     `json:"cwd"`
+	Model     string                     `json:"model,omitempty"`
+	Options   map[string]json.RawMessage `json:"options,omitempty"`
 }
 
 type Task struct {
@@ -46,20 +51,26 @@ type Task struct {
 }
 
 type Run struct {
-	ID           string  `json:"id"`
-	ProjectID    string  `json:"projectId"`
-	TaskID       string  `json:"taskId"`
-	AgentID      string  `json:"agentId"`
-	NodeID       string  `json:"nodeId"`
-	OriginatorID string  `json:"originatorId"`
-	Purpose      string  `json:"purpose"`
-	State        string  `json:"state"`
-	CommandID    string  `json:"commandId"`
-	SessionID    string  `json:"sessionId"`
-	ActivityID   string  `json:"activityId"`
-	StartedAt    *string `json:"startedAt"`
-	EndedAt      *string `json:"endedAt"`
-	Error        *string `json:"error"`
+	ID                  string           `json:"id"`
+	ProjectID           string           `json:"projectId"`
+	TaskID              string           `json:"taskId"`
+	AgentID             string           `json:"agentId"`
+	NodeID              string           `json:"nodeId"`
+	OriginatorID        string           `json:"originatorId"`
+	Purpose             string           `json:"purpose"`
+	State               string           `json:"state"`
+	CommandID           string           `json:"commandId"`
+	SessionID           string           `json:"sessionId"`
+	ActivityID          string           `json:"activityId"`
+	StartedAt           *string          `json:"startedAt"`
+	EndedAt             *string          `json:"endedAt"`
+	Error               *string          `json:"error"`
+	InstanceID          string           `json:"instanceId,omitempty"`
+	Admission           p.Admission      `json:"admission,omitempty"`
+	LastSeq             uint64           `json:"lastSeq,omitempty"`
+	NeedsReconciliation bool             `json:"needsReconciliation"`
+	Handle              *p.SessionHandle `json:"handle,omitempty"`
+	Stop                *p.StopEvidence  `json:"stop,omitempty"`
 }
 
 type Report struct {
@@ -99,12 +110,13 @@ type Event struct {
 // Job is a durable request awaiting execution. An unbound Agent may have no node
 // yet; a versioned dispatch can only be built once an authorized node is chosen.
 type Job struct {
-	CommandID string `json:"commandId"`
-	RunID     string `json:"runId"`
-	ProjectID string `json:"projectId"`
-	AgentID   string `json:"agentId"`
-	State     string `json:"state"`
-	Prompt    string `json:"prompt"`
+	CommandID string      `json:"commandId"`
+	RunID     string      `json:"runId"`
+	ProjectID string      `json:"projectId"`
+	AgentID   string      `json:"agentId"`
+	State     string      `json:"state"`
+	Prompt    string      `json:"prompt"`
+	Dispatch  *p.Dispatch `json:"dispatch,omitempty"`
 }
 
 type CardView struct {

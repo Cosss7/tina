@@ -32,7 +32,7 @@ var caps = p.Capabilities{Resume: true, Interrupt: p.InterruptProcess}
 func (*Driver) Definition() engine.Definition {
 	return engine.Definition{ID: "dsh", Capabilities: caps}
 }
-func (d *Driver) Probe(ctx context.Context, _ p.SessionConfig) (engine.Probe, error) {
+func (d *Driver) Probe(ctx context.Context, config p.SessionConfig) (engine.Probe, error) {
 	if err := ctx.Err(); err != nil {
 		return engine.Probe{}, err
 	}
@@ -40,6 +40,9 @@ func (d *Driver) Probe(ctx context.Context, _ p.SessionConfig) (engine.Probe, er
 		return engine.Probe{Diagnostic: "dsh command is not configured", Capabilities: caps}, nil
 	}
 	_, err := exec.LookPath(d.Options.Command[0])
+	if configErr := validateConfig(config); configErr != nil {
+		return engine.Probe{Diagnostic: configErr.Error(), Capabilities: caps}, nil
+	}
 	return engine.Probe{Available: err == nil, Version: "stdio-v1", Diagnostic: fmt.Sprint(err), Capabilities: caps}, nil
 }
 func (d *Driver) Create(ctx context.Context, o engine.OpenOptions) (engine.Session, error) {
@@ -50,6 +53,9 @@ func (d *Driver) Resume(ctx context.Context, h p.SessionHandle, o engine.OpenOpt
 }
 func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.SessionHandle) (engine.Session, error) {
 	if err := o.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateConfig(o.Config); err != nil {
 		return nil, err
 	}
 	if len(d.Options.Command) == 0 {
@@ -94,7 +100,7 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 		stderr.Close()
 		return nil, fmt.Errorf("start dsh %q: %w", d.Options.Command[0], err)
 	}
-	s := &Session{scope: scope, stdin: stdin, updates: make(chan engine.Update, 256), nativeID: "tina-" + rand.Text(), info: engine.SessionInfo{SessionID: o.SessionID, InstanceID: rand.Text(), Capabilities: p.Capabilities{Interrupt: p.InterruptProcess}}, commands: map[string]p.Receipt{}}
+	s := &Session{scope: scope, stdin: stdin, updates: make(chan engine.Update, 256), nativeID: "tina-" + rand.Text(), info: engine.SessionInfo{SessionID: o.SessionID, InstanceID: rand.Text(), Capabilities: p.Capabilities{Interrupt: p.InterruptProcess}}, commands: map[string]p.Receipt{}, fingerprints: map[string]string{}}
 	s.rpc = newRPC(stdin, stdout, stderr, s.onEvent)
 	cleanup := func(cause error) (engine.Session, error) {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -158,11 +164,13 @@ type Session struct {
 	updates        chan engine.Update
 	active         *p.Input
 	output         string
+	usage          p.Usage
 	seq            uint64
 	closed         bool
 	stopping       bool
 	stdin          *os.File
 	commands       map[string]p.Receipt
+	fingerprints   map[string]string
 }
 
 func (s *Session) Info() engine.SessionInfo {
@@ -182,7 +190,14 @@ func (s *Session) setHandle(home string) {
 }
 func (s *Session) Updates() <-chan engine.Update { return s.updates }
 func (s *Session) Submit(ctx context.Context, in p.Input) (p.Receipt, error) {
+	if err := ctx.Err(); err != nil {
+		return p.Receipt{}, err
+	}
 	if err := in.Validate(); err != nil {
+		return p.Receipt{}, err
+	}
+	fingerprint, err := json.Marshal(in)
+	if err != nil {
 		return p.Receipt{}, err
 	}
 	s.mu.Lock()
@@ -195,6 +210,10 @@ func (s *Session) Submit(ctx context.Context, in p.Input) (p.Receipt, error) {
 		return p.Receipt{}, engine.ErrConflict
 	}
 	if prior, ok := s.commands[in.CommandID]; ok {
+		if s.fingerprints[in.CommandID] != string(fingerprint) {
+			s.mu.Unlock()
+			return p.Receipt{}, engine.ErrConflict
+		}
 		s.mu.Unlock()
 		return prior, nil
 	}
@@ -204,11 +223,14 @@ func (s *Session) Submit(ctx context.Context, in p.Input) (p.Receipt, error) {
 	}
 	s.active = &in
 	s.output = ""
+	s.usage = p.Usage{}
+	s.fingerprints[in.CommandID] = string(fingerprint)
+	s.commands[in.CommandID] = p.Receipt{CommandID: in.CommandID, Execution: in.Execution, InstanceID: in.InstanceID, Admission: p.Admitted}
 	s.mu.Unlock()
 	var reply struct {
 		MessageID string `json:"messageId"`
 	}
-	err := s.rpc.call(ctx, "session/prompt", map[string]any{"sessionId": s.nativeID, "contentBlocks": []map[string]string{{"type": "text", "text": in.Text}}}, &reply)
+	err = s.rpc.call(ctx, "session/prompt", map[string]any{"sessionId": s.nativeID, "contentBlocks": []map[string]string{{"type": "text", "text": in.Text}}}, &reply)
 	receipt := p.Receipt{CommandID: in.CommandID, Execution: in.Execution, InstanceID: in.InstanceID, Admission: p.Unknown}
 	if err != nil || reply.MessageID == "" {
 		receipt.Failure = &p.Failure{Code: "native_acceptance_unknown", Message: "native prompt acceptance requires reconciliation"}
@@ -229,7 +251,8 @@ func (s *Session) finish(state p.TerminalState, failure *p.Failure, stop *p.Stop
 		return
 	}
 	s.seq++
-	s.updates <- engine.Update{Result: &p.Result{Execution: s.active.Execution, InstanceID: s.info.InstanceID, CommandID: s.active.CommandID, Seq: s.seq, OccurredAt: time.Now().UTC(), State: state, Output: s.output, Failure: failure, Stop: stop, Handle: s.info.Handle}}
+	usage := s.usage
+	s.updates <- engine.Update{Result: &p.Result{Execution: s.active.Execution, InstanceID: s.info.InstanceID, CommandID: s.active.CommandID, Seq: s.seq, OccurredAt: time.Now().UTC(), State: state, Output: s.output, Failure: failure, Stop: stop, Handle: s.info.Handle, Usage: &usage}}
 	s.active = nil
 }
 func (s *Session) onEvent(params json.RawMessage) {
@@ -263,6 +286,7 @@ func (s *Session) onEvent(params json.RawMessage) {
 		CallID    string          `json:"callId"`
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
+		Usage     *p.Usage        `json:"usage"`
 	}
 	if json.Unmarshal(notification.Event.Data, &data) != nil {
 		return
@@ -282,6 +306,13 @@ func (s *Session) onEvent(params json.RawMessage) {
 			s.output = text.String()
 			event := s.event(p.MessageText)
 			event.Text = s.output
+			s.updates <- engine.Update{Event: event}
+		}
+		if data.Usage != nil && data.Usage.Validate() == nil {
+			s.usage.InputTokens += data.Usage.InputTokens
+			s.usage.OutputTokens += data.Usage.OutputTokens
+			event := s.event(p.UsageReported)
+			event.Usage = data.Usage
 			s.updates <- engine.Update{Event: event}
 		}
 	case "tool/call":
@@ -351,3 +382,15 @@ func (s *Session) Close(ctx context.Context) (p.StopEvidence, error) {
 var _ engine.Driver = (*Driver)(nil)
 var _ engine.Resumer = (*Driver)(nil)
 var _ engine.Interrupter = (*Session)(nil)
+
+func validateConfig(config p.SessionConfig) error {
+	if config.SystemPrompt != "" {
+		return fmt.Errorf("%w: native SDK does not expose a systemPrompt parameter", engine.ErrUnsupported)
+	}
+	for key := range config.Options {
+		if key != "reasoningEffort" && key != "maxTokens" {
+			return fmt.Errorf("%w: dsh option %q", engine.ErrUnsupported, key)
+		}
+	}
+	return nil
+}

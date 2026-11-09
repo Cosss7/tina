@@ -323,6 +323,9 @@ func (r *Runtime) collect(session engine.Session) {
 			}
 			if update.Event != nil {
 				rec.LastSeq = seq
+				if update.Event.Kind == p.ActivityStarted {
+					rec.Started = true
+				}
 			} else {
 				rec.LastSeq = seq
 				rec.Result = update.Result
@@ -391,13 +394,20 @@ func (r *Runtime) reconcile(request p.ReconcileRequest) error {
 	}
 	response := p.ReconcileResponse{NodeID: r.config.NodeID, Observations: []p.Observation{}}
 	seen := map[p.Execution]bool{}
+	requested := map[p.Execution]bool{}
+	for _, cursor := range request.Known {
+		requested[cursor.Execution] = true
+	}
 	for _, rec := range records {
+		if !requested[rec.Execution] && (rec.Result != nil || rec.Receipt.Admission == p.Rejected) {
+			continue
+		}
 		observation := p.Observation{Cursor: p.Cursor{Execution: rec.Execution, InstanceID: rec.Receipt.InstanceID, LastSeq: rec.LastSeq}, State: "unknown", Result: rec.Result}
 		if rec.Result != nil {
 			observation.State = string(rec.Result.State)
 			observation.LastSeq = rec.Result.Seq
 			observation.InstanceID = rec.Result.InstanceID
-		} else if r.active[rec.CommandID] && rec.Receipt.Admission == p.Accepted {
+		} else if r.active[rec.CommandID] && rec.Started && r.sessions[rec.Execution.SessionID] != nil {
 			observation.State = "running"
 		}
 		response.Observations = append(response.Observations, observation)
