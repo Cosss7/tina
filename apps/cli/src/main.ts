@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * tina 命令。H0 只有 `up`：把控制面和节点一起拉起来，Ctrl+C 一起收掉。
+ * tina 命令。H0 只有 `up`：把控制面和节点一起拉起来，Ctrl+C 一起收掉
  *
- * 控制面是 Go 二进制，节点是 `packages/node-runtime` 的入口。两边的日志都带上
- * 前缀转出来，免得一个进程的报错被另一个淹没。
+ * 控制面是 Go 二进制，节点是 `packages/node-runtime` 的入口
+ * 两边的日志都带上前缀
  */
 
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,24 +29,24 @@ function parseArgs(argv: string[]): Options {
     const arg = argv[index];
     if (arg === '--addr') {
       const value = argv[index + 1];
-      if (value === undefined) throw new Error('--addr 后面要跟一个地址');
+      if (value === undefined) throw new Error('--addr HOST:PORT');
       addr = value;
       index += 1;
     } else if (arg === '--no-node') {
       withNode = false;
     } else {
-      throw new Error(`不认识的参数：${arg}`);
+      throw new Error(`Unknown arguments: ${arg}`);
     }
   }
   const port = Number(addr.split(':').pop());
-  if (!Number.isInteger(port) || port <= 0) throw new Error(`地址里没有端口：${addr}`);
+  if (!Number.isInteger(port) || port <= 0) throw new Error(`Missing port: ${addr}`);
   return { addr, port, withNode };
 }
 
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command !== 'up') {
-    console.log('用法：tina up [--addr 127.0.0.1:7801] [--no-node]');
+    console.log('Usage: tina up [--addr 127.0.0.1:7801] [--no-node]');
     process.exit(command === undefined || command === '--help' ? 0 : 1);
   }
 
@@ -68,16 +68,16 @@ async function main(): Promise<void> {
 
   const control = spawn(BIN, ['-addr', options.addr], { stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(control);
-  pipe(control, '控制面');
+  pipe(control, 'Control Plane');
   control.on('exit', (code) => {
     if (!stopping) {
-      console.error(`[tina] 控制面退出了（code ${String(code)}）`);
+      console.error(`[tina] Control Plane Exited (code ${String(code)})`);
       stop(code ?? 1);
     }
   });
 
   await waitForHealth(options.port, 15_000).catch((error: unknown) => {
-    console.error(`[tina] 控制面没起来：${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[tina] Control Plane start failed: ${error instanceof Error ? error.message : String(error)}`);
     stop(1);
   });
 
@@ -90,32 +90,25 @@ async function main(): Promise<void> {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     children.push(node);
-    pipe(node, '节点');
+    pipe(node, 'Agent Node');
     node.on('exit', (code) => {
       if (!stopping) {
-        console.error(`[tina] 节点退出了（code ${String(code)}）`);
+        console.error(`[tina] Agent Node Exited (code ${String(code)})`);
         stop(code ?? 1);
       }
     });
   }
 
   console.log('');
-  console.log(`  Tina 起来了：http://${options.addr}`);
-  console.log(`  节点：${options.withNode ? '已启动' : '未启动（--no-node）'}`);
-  console.log('  Ctrl+C 停止');
+  console.log(`  Tina started: http://${options.addr}`);
+  console.log(`  Agent Node: ${options.withNode ? 'success' : 'disabled (--no-node)'}`);
+  console.log('  Ctrl+C Stop');
   console.log('');
 }
 
 function ensureControlPlane(): void {
-  if (existsSync(BIN)) return;
-  console.log('[tina] 没有找到控制面二进制，先编译一次');
-  const result = spawnSync('go', ['-C', 'services/control-plane', 'build', '-o', `../../.build/control-plane${EXE}`, '.'], {
-    cwd: ROOT,
-    stdio: 'inherit',
-  });
-  if (result.status !== 0) {
-    console.error('[tina] 编译失败。先跑一次 make build（它会顺手把 Go 的环境变量补齐）。');
-    process.exit(1);
+  if (!existsSync(BIN)) {
+    throw new Error(`Control Plane binary not found: ${BIN}. Run make build first.`);
   }
 }
 
@@ -141,7 +134,7 @@ async function waitForHealth(port: number, timeoutMs: number): Promise<void> {
     } catch {
       // 还没起来，继续等
     }
-    if (Date.now() > deadline) throw new Error(`${timeoutMs}ms 内没等到 /health`);
+    if (Date.now() > deadline) throw new Error(`${timeoutMs}ms /health no response`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
