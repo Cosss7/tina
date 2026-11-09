@@ -22,12 +22,12 @@ test('TINA_PROJECTS 覆盖项目列表', () => {
 });
 
 test('坏的项目配置会被拒绝', () => {
-  assert.throws(() => loadConfig({ TINA_PROJECTS: '[]' }), /非空数组/);
-  assert.throws(() => loadConfig({ TINA_PROJECTS: '[{"id":"a"}]' }), /name 缺失/);
+  assert.throws(() => loadConfig({ TINA_PROJECTS: '[]' }), /non-empty array/);
+  assert.throws(() => loadConfig({ TINA_PROJECTS: '[{"id":"a"}]' }), /name is required/);
 });
 
 test('心跳间隔必须是正整数', () => {
   assert.equal(loadConfig({ TINA_HEARTBEAT_MS: '250' }).heartbeatMs, 250);
-  assert.throws(() => loadConfig({ TINA_HEARTBEAT_MS: '0' }), /正整数/);
-  assert.throws(() => loadConfig({ TINA_HEARTBEAT_MS: 'abc' }), /正整数/);
+  assert.throws(() => loadConfig({ TINA_HEARTBEAT_MS: '0' }), /positive integer/);
+  assert.throws(() => loadConfig({ TINA_HEARTBEAT_MS: 'abc' }), /positive integer/);
 });

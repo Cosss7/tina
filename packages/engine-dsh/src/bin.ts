@@ -21,9 +21,9 @@ const port = Number(process.env.TINA_ENGINE_PORT);
 const token = process.env.TINA_ENGINE_TOKEN;
 const dshBin = process.env.TINA_DSH_BIN;
 
-if (!Number.isInteger(port) || port <= 0) throw new Error('TINA_ENGINE_PORT 缺失');
-if (token === undefined || token === '') throw new Error('TINA_ENGINE_TOKEN 缺失');
-if (dshBin === undefined || dshBin === '') throw new Error('TINA_DSH_BIN 缺失（指向 dsh 的 lib/bin.js）');
+if (!Number.isInteger(port) || port <= 0) throw new Error('TINA_ENGINE_PORT must be a positive integer');
+if (token === undefined || token === '') throw new Error('TINA_ENGINE_TOKEN is required');
+if (dshBin === undefined || dshBin === '') throw new Error('TINA_DSH_BIN is required (path to dsh lib/bin.js)');
 
 const served = await serveEngine({
   port,

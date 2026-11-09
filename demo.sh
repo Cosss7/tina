@@ -18,7 +18,7 @@ PROJECT="${TINA_PROJECT:-proj-website}"
 BIN="$(ls .build/control-plane* 2>/dev/null | head -1 || true)"
 
 if [[ -z "${BIN}" ]]; then
-  echo "先跑一次 make build，生成 .build/control-plane" >&2
+  echo "Control plane binary not found. Run make build first." >&2
   exit 1
 fi
 
@@ -54,11 +54,11 @@ board() {
     process.stdin.on("end", () => {
       const board = JSON.parse(raw);
       for (const card of board.cards) {
-        const kind = card.kind === "demand" ? "需求" : "任务";
-        console.log(`   - [${card.status}] ${card.title}（${kind}）`);
+        const kind = card.kind === "demand" ? "Request" : "Task";
+        console.log(`   - [${card.status}] ${card.title} (${kind})`);
       }
       for (const approval of board.approvals) {
-        console.log(`   ! 待批 ${approval.kind}：${approval.payload?.summary ?? ""}`);
+        console.log(`   ! Pending ${approval.kind}: ${approval.payload?.summary ?? ""}`);
       }
     });
   '
@@ -94,32 +94,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "起控制面和节点"
+step "Starting control plane and node"
 "${BIN}" -addr "127.0.0.1:${PORT}" >/tmp/tina-demo-cp.log 2>&1 &
 CP_PID=$!
 for _ in $(seq 1 100); do
   curl -fsS "${BASE}/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
-curl -fsS "${BASE}/health" >/dev/null || { echo "控制面没起来" >&2; exit 1; }
+curl -fsS "${BASE}/health" >/dev/null || { echo "Control plane failed to start" >&2; exit 1; }
 TINA_CONTROL_PLANE_URL="ws://127.0.0.1:${PORT}/ws/node" node packages/node-runtime/src/main.ts >/tmp/tina-demo-node.log 2>&1 &
 NODE_PID=$!
 for _ in $(seq 1 100); do
   curl -fsS "${BASE}/api/state" | grep -q '"online":true' && break
   sleep 0.1
 done
-note "控制面 ${BASE}，节点已注册"
+note "Control plane at ${BASE}; node registered"
 
-step "1. 建卡"
+step "1. Create request card"
 TASK_ID=$(post "/api/cards" "{\"projectId\":\"${PROJECT}\",\"title\":\"网站改版\",\"description\":\"首屏和接口一起改，下周上线\"}" | json id)
-note "需求卡 ${TASK_ID}"
+note "Request card: ${TASK_ID}"
 
-step "2. Router 拆卡"
+step "2. Request a plan from Router"
 APPROVAL_ID=$(post "/api/plans" "{\"projectId\":\"${PROJECT}\",\"taskId\":\"${TASK_ID}\"}" | json id)
-note "计划 ${APPROVAL_ID} 待批"
+note "Plan ${APPROVAL_ID} awaiting approval"
 board
 
-step "3. 批计划（批准后才会创建任务卡）"
+step "3. Approve plan and create task cards"
 PLAN_TASKS=$(post "/api/plans/${APPROVAL_ID}/decide" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\"}" | json tasks)
 mapfile -t IDS < <(echo "${PLAN_TASKS}" | node -e '
   let raw = "";
@@ -128,23 +128,23 @@ mapfile -t IDS < <(echo "${PLAN_TASKS}" | node -e '
     for (const task of JSON.parse(raw)) console.log(task.id);
   });
 ')
-note "新任务卡 ${#IDS[@]} 张"
+note "Created ${#IDS[@]} task cards"
 board
 
-step "4. 派活（每张卡一个会话）"
+step "4. Dispatch tasks (one session per card)"
 for id in "${IDS[@]}"; do
   post "/api/tasks/${id}/dispatch" "{\"projectId\":\"${PROJECT}\"}" >/dev/null
-  note "派出 ${id}"
+  note "Dispatched ${id}"
 done
 for id in "${IDS[@]}"; do
-  wait_status "${id}" review || { echo "有卡没跑到评审中：${id}" >&2; board; exit 1; }
+  wait_status "${id}" review || { echo "Card did not reach review: ${id}" >&2; board; exit 1; }
 done
-note "全部跑完，报告已落库"
+note "All runs finished; reports saved"
 board
 
-step "5. 人终审第一张"
+step "5. Approve final review for the first task"
 post "/api/tasks/${IDS[0]}/review" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\",\"note\":\"验收通过\"}" >/dev/null
 board
 
-step "完成"
-note "库里：1 张需求卡 + ${#IDS[@]} 张任务卡；第一张已终审通过，其余停在评审中"
+step "Done"
+note "Saved: 1 request card and ${#IDS[@]} task cards; first task approved, others awaiting review"

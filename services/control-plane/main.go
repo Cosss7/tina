@@ -16,7 +16,7 @@ const version = "0.1.0"
 var webFS embed.FS
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:7801", "监听地址")
+	addr := flag.String("addr", "127.0.0.1:7801", "Listen address")
 	flag.Parse()
 
 	hub := NewHub()
@@ -30,7 +30,7 @@ func main() {
 
 	static, err := fs.Sub(webFS, "web")
 	if err != nil {
-		log.Fatalf("内嵌页面缺失: %v", err)
+		log.Fatalf("Embedded web assets missing: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -49,9 +49,9 @@ func main() {
 	mux.HandleFunc("POST /api/tasks/{id}/review", hub.reviewTask)
 	mux.Handle("GET /", http.FileServerFS(static))
 
-	log.Printf("控制面在 http://%s 上线", *addr)
+	log.Printf("Control plane listening on http://%s", *addr)
 	if err := http.ListenAndServe(*addr, mux); err != nil {
-		log.Fatalf("控制面退出: %v", err)
+		log.Fatalf("Control plane stopped: %v", err)
 	}
 }
 
@@ -59,6 +59,6 @@ func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
-		log.Printf("写响应失败: %v", err)
+		log.Printf("Failed to write response: %v", err)
 	}
 }

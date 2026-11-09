@@ -12,7 +12,7 @@ import (
 func (h *Hub) board(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("project")
 	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "缺少 project 参数")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "Missing query parameter: project")
 		return
 	}
 	h.forward(w, r, projectID, "board", map[string]any{"projectId": projectID})
@@ -26,7 +26,7 @@ func (h *Hub) createCard(w http.ResponseWriter, r *http.Request) {
 	projectID := stringField(body, "projectId")
 	title := stringField(body, "title")
 	if projectID == "" || title == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId 和 title 都要有")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId and title are required")
 		return
 	}
 	h.forward(w, r, projectID, "card.create", map[string]any{
@@ -44,7 +44,7 @@ func (h *Hub) requestPlan(w http.ResponseWriter, r *http.Request) {
 	projectID := stringField(body, "projectId")
 	taskID := stringField(body, "taskId")
 	if projectID == "" || taskID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId 和 taskId 都要有")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId and taskId are required")
 		return
 	}
 	h.forward(w, r, projectID, "plan.request", map[string]any{"projectId": projectID, "taskId": taskID})
@@ -57,7 +57,7 @@ func (h *Hub) decidePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := stringField(body, "projectId")
 	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "缺少 projectId")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId is required")
 		return
 	}
 	h.forward(w, r, projectID, "plan.decide", map[string]any{
@@ -73,7 +73,7 @@ func (h *Hub) dispatchTask(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := stringField(body, "projectId")
 	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "缺少 projectId")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId is required")
 		return
 	}
 	h.forward(w, r, projectID, "task.dispatch", map[string]any{"taskId": r.PathValue("id")})
@@ -86,7 +86,7 @@ func (h *Hub) reviewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := stringField(body, "projectId")
 	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "缺少 projectId")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId is required")
 		return
 	}
 	h.forward(w, r, projectID, "task.review", map[string]any{
@@ -101,21 +101,21 @@ func (h *Hub) forward(w http.ResponseWriter, r *http.Request, projectID, method 
 	result, err := h.callNode(r.Context(), projectID, method, params)
 	if err != nil {
 		status, code := rpcStatus(err)
-		log.Printf("%s 失败：%v", method, err)
+		log.Printf("%s failed: %v", method, err)
 		writeError(w, status, code, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if _, err := w.Write(result); err != nil {
-		log.Printf("写响应失败：%v", err)
+		log.Printf("Failed to write response: %v", err)
 	}
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "读不出请求体")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "Failed to read request body")
 		return nil, false
 	}
 	if len(raw) == 0 {
@@ -123,7 +123,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
 	}
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "请求体不是 JSON 对象")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "Request body must be a JSON object")
 		return nil, false
 	}
 	return body, true

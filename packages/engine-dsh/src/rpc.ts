@@ -41,7 +41,7 @@ export class DshRpc {
     }
     child.on('exit', (code, signal) => {
       this.#closed = true;
-      const reason = `dsh 退出（code=${String(code)} signal=${String(signal)}）`;
+      const reason = `dsh exited (code=${String(code)} signal=${String(signal)})`;
       for (const [, pending] of this.#pending) pending.reject(new Error(reason));
       this.#pending.clear();
     });
@@ -57,12 +57,12 @@ export class DshRpc {
   }
 
   async call<T>(method: string, params?: unknown, timeoutMs = 120_000): Promise<T> {
-    if (this.#closed) throw new Error('dsh 已退出');
+    if (this.#closed) throw new Error('dsh has exited');
     const id = this.#nextId++;
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`${method} 超时（${timeoutMs}ms）`));
+        reject(new Error(`${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       this.#pending.set(id, {
         resolve: (value) => {
@@ -100,7 +100,7 @@ export class DshRpc {
     if (pending === undefined) return;
     this.#pending.delete(id);
     const error = message.error as { message?: string } | undefined;
-    if (error !== undefined) pending.reject(new Error(error.message ?? 'dsh 报了错'));
+    if (error !== undefined) pending.reject(new Error(error.message ?? 'dsh request failed'));
     else pending.resolve(message.result);
   }
 }

@@ -60,12 +60,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 function parseProjects(raw: string | undefined): ProjectRef[] {
   if (raw === undefined || raw.trim() === '') return DEFAULT_PROJECTS.map((project) => ({ ...project }));
   const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('TINA_PROJECTS 必须是非空数组');
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('TINA_PROJECTS must be a non-empty array');
   return parsed.map((item, index) => {
-    if (typeof item !== 'object' || item === null) throw new Error(`TINA_PROJECTS[${index}] 不是对象`);
+    if (typeof item !== 'object' || item === null) throw new Error(`TINA_PROJECTS[${index}] must be an object`);
     const project = item as Record<string, unknown>;
-    if (typeof project.id !== 'string' || project.id === '') throw new Error(`TINA_PROJECTS[${index}].id 缺失`);
-    if (typeof project.name !== 'string' || project.name === '') throw new Error(`TINA_PROJECTS[${index}].name 缺失`);
+    if (typeof project.id !== 'string' || project.id === '') throw new Error(`TINA_PROJECTS[${index}].id is required`);
+    if (typeof project.name !== 'string' || project.name === '') throw new Error(`TINA_PROJECTS[${index}].name is required`);
     return { id: project.id, name: project.name };
   });
 }
@@ -73,6 +73,6 @@ function parseProjects(raw: string | undefined): ProjectRef[] {
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`需要正整数，收到 ${raw}`);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`Expected a positive integer, got ${raw}`);
   return value;
 }

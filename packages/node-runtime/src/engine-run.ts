@@ -66,7 +66,7 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
     await host.call('send', { sessionId, input: options.prompt });
 
     const finished = await waitUntil(() => events.some((event) => event.type === 'turn.end'), timeoutMs);
-    if (!finished) throw new Error(`一轮没在 ${timeoutMs}ms 内结束\n${stderr.join('')}`);
+    if (!finished) throw new Error(`Turn timed out after ${timeoutMs}ms\n${stderr.join('')}`);
 
     await host.call('close', { sessionId }).catch(() => {});
     return { events, text: lastText(events), usage: lastUsage(events), engine: info.engine };

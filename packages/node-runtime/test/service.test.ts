@@ -116,7 +116,7 @@ test('报告解析不了时 Run 失败，并补一份 generated 的兜底报告'
   const { run } = service.dispatch({ taskId: tasks[0]!.id, actor: 'human' });
   await service.waitForRun(run.id);
   assert.equal(store.getRun(run.id)?.state, 'failed');
-  assert.match(store.getRun(run.id)?.error ?? '', /找不到合法 JSON/);
+  assert.match(store.getRun(run.id)?.error ?? '', /No valid JSON object/);
   const report = store.getReportByRun(run.id);
   assert.equal(report?.generated, true);
   assert.equal(report?.state, 'failed');
@@ -126,14 +126,14 @@ test('计划没批不能派活；需求卡不能直接派活', async () => {
   const { store, service } = setup();
   const demand = service.createDemand({ projectId: 'p', title: '需求', actor: 'human' });
   assert.throws(() => service.dispatch({ taskId: demand.id, actor: 'human' }), (error: unknown) =>
-    error instanceof ServiceError && /需求卡/.test(error.message));
+    error instanceof ServiceError && /Split the request into tasks/.test(error.message));
 
   const approval = await service.requestPlan({ projectId: 'p', taskId: demand.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
   const task = store.getTask(tasks[0]!.id)!;
   store.updateTask(task, { planApproved: false });
   assert.throws(() => service.dispatch({ taskId: task.id, actor: 'human' }), (error: unknown) =>
-    error instanceof ServiceError && /计划还没批/.test(error.message));
+    error instanceof ServiceError && /Plan is not approved/.test(error.message));
 });
 
 test('拒绝计划不产生任务卡', async () => {
@@ -170,6 +170,6 @@ test('Router 计划与 Worker 报告的解析能容忍围栏和前后废话', ()
   const report = parseReport('好的，报告如下：{"state":"done","summary":"完事","decisions":[],"blockers":[]}');
   assert.equal(report.summary, '完事');
 
-  assert.throws(() => parsePlan('没有 JSON'), /找不到合法 JSON/);
-  assert.throws(() => parseReport('{"state":"weird","summary":"x"}'), /state 只能是/);
+  assert.throws(() => parsePlan('没有 JSON'), /No valid JSON object/);
+  assert.throws(() => parseReport('{"state":"weird","summary":"x"}'), /state must be/);
 });

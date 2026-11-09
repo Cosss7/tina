@@ -65,7 +65,7 @@ export class DshBackend implements EngineBackend {
   }
 
   async createSession(_params: CreateSessionParams): Promise<CreateSessionResult> {
-    if (this.#child !== null) throw new Error('这个引擎已经有一个会话了');
+    if (this.#child !== null) throw new Error('Engine already has a session');
     const child = spawn(process.execPath, [this.#options.dshBin, '--profile', this.#options.profile], {
       cwd: this.#options.cwd,
       env: { ...process.env, ...this.#options.env },
@@ -90,7 +90,7 @@ export class DshBackend implements EngineBackend {
       // dsh 的报错都在 stderr 上，带上最后一小段，省得只看到"退出了"。
       const tail = this.#stderrTail.slice(-12).join(String.fromCharCode(10));
       const reason = error instanceof Error ? error.message : String(error);
-      const message = `dsh 初始化失败：${reason}` + String.fromCharCode(10) + tail;
+      const message = `Failed to initialize dsh: ${reason}` + String.fromCharCode(10) + tail;
       throw new Error(message);
     }
     const sessionId = `dsh-${process.pid}`;
@@ -148,7 +148,7 @@ export class DshBackend implements EngineBackend {
   }
 
   #require(): DshRpc {
-    if (this.#rpc === null) throw new Error('会话还没建');
+    if (this.#rpc === null) throw new Error('No session created');
     return this.#rpc;
   }
 

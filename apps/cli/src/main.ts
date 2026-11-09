@@ -29,17 +29,17 @@ function parseArgs(argv: string[]): Options {
     const arg = argv[index];
     if (arg === '--addr') {
       const value = argv[index + 1];
-      if (value === undefined) throw new Error('--addr HOST:PORT');
+      if (value === undefined) throw new Error('--addr requires HOST:PORT');
       addr = value;
       index += 1;
     } else if (arg === '--no-node') {
       withNode = false;
     } else {
-      throw new Error(`Unknown arguments: ${arg}`);
+      throw new Error(`Unknown argument: ${arg}`);
     }
   }
   const port = Number(addr.split(':').pop());
-  if (!Number.isInteger(port) || port <= 0) throw new Error(`Missing port: ${addr}`);
+  if (!Number.isInteger(port) || port <= 0) throw new Error(`Invalid port in address: ${addr}`);
   return { addr, port, withNode };
 }
 
@@ -71,13 +71,13 @@ async function main(): Promise<void> {
   pipe(control, 'Control Plane');
   control.on('exit', (code) => {
     if (!stopping) {
-      console.error(`[tina] Control Plane Exited (code ${String(code)})`);
+      console.error(`[tina] Control plane exited (code ${String(code)})`);
       stop(code ?? 1);
     }
   });
 
   await waitForHealth(options.port, 15_000).catch((error: unknown) => {
-    console.error(`[tina] Control Plane start failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[tina] Control plane failed to start: ${error instanceof Error ? error.message : String(error)}`);
     stop(1);
   });
 
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     pipe(node, 'Agent Node');
     node.on('exit', (code) => {
       if (!stopping) {
-        console.error(`[tina] Agent Node Exited (code ${String(code)})`);
+        console.error(`[tina] Agent node exited (code ${String(code)})`);
         stop(code ?? 1);
       }
     });
@@ -101,14 +101,14 @@ async function main(): Promise<void> {
 
   console.log('');
   console.log(`  Tina started: http://${options.addr}`);
-  console.log(`  Agent Node: ${options.withNode ? 'success' : 'disabled (--no-node)'}`);
-  console.log('  Ctrl+C Stop');
+  console.log(`  Agent node: ${options.withNode ? 'started' : 'disabled (--no-node)'}`);
+  console.log('  Press Ctrl+C to stop');
   console.log('');
 }
 
 function ensureControlPlane(): void {
   if (!existsSync(BIN)) {
-    throw new Error(`Control Plane binary not found: ${BIN}. Run make build first.`);
+    throw new Error(`Control plane binary not found: ${BIN}. Run make build first.`);
   }
 }
 
@@ -134,7 +134,7 @@ async function waitForHealth(port: number, timeoutMs: number): Promise<void> {
     } catch {
       // 还没起来，继续等
     }
-    if (Date.now() > deadline) throw new Error(`${timeoutMs}ms /health no response`);
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for /health after ${timeoutMs}ms`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }

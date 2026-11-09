@@ -50,7 +50,7 @@ export function createRpcHandler(service: Service, actor = 'human:local'): RpcHa
           });
         }
         default:
-          throw new ServiceError('method_not_found', `节点不认这个方法：${method}`);
+          throw new ServiceError('method_not_found', `Unknown method: ${method}`);
       }
     } catch (error) {
       if (error instanceof ServiceError) throw error;
@@ -66,7 +66,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function requireString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
-  if (typeof value !== 'string' || value === '') throw new ServiceError('invalid_argument', `缺少参数 ${key}`);
+  if (typeof value !== 'string' || value === '') throw new ServiceError('invalid_argument', `Missing parameter: ${key}`);
   return value;
 }
 
@@ -78,7 +78,7 @@ function optionalString(args: Record<string, unknown>, key: string): string | un
 function requireDecision(args: Record<string, unknown>): 'approved' | 'rejected' {
   const value = args.decision;
   if (value !== 'approved' && value !== 'rejected') {
-    throw new ServiceError('invalid_argument', 'decision 只能是 approved 或 rejected');
+    throw new ServiceError('invalid_argument', 'decision must be approved or rejected');
   }
   return value;
 }

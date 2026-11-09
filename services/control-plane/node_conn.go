@@ -42,7 +42,7 @@ func (n *nodeConn) call(ctx context.Context, method string, params any) (json.Ra
 	n.mu.Lock()
 	if n.closed {
 		n.mu.Unlock()
-		return nil, errors.New("节点连接已关闭")
+		return nil, errors.New("node connection is closed")
 	}
 	n.nextID++
 	id := fmt.Sprintf("req-%d", n.nextID)
@@ -70,7 +70,7 @@ func (n *nodeConn) call(ctx context.Context, method string, params any) (json.Ra
 
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("等节点响应超时：%w", ctx.Err())
+		return nil, fmt.Errorf("timed out waiting for node response: %w", ctx.Err())
 	case got := <-ch:
 		if got.err != nil {
 			return nil, got.err
@@ -137,7 +137,7 @@ func rpcStatus(err error) (int, string) {
 func (h *Hub) callNode(ctx context.Context, projectID, method string, params any) (json.RawMessage, error) {
 	conn := h.connectionFor(projectID)
 	if conn == nil {
-		return nil, &wsError{status: 503, code: "node_offline", msg: "没有在线的节点托管这个项目"}
+		return nil, &wsError{status: 503, code: "node_offline", msg: "No online node hosts this project"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

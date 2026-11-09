@@ -119,7 +119,7 @@ export class NodeConnection {
 
     const handler = this.#events.onRequest;
     if (handler === undefined) {
-      this.#send({ type: 'response', id: request.id, error: { code: 'unimplemented', message: '节点没有挂请求处理器' } });
+      this.#send({ type: 'response', id: request.id, error: { code: 'unimplemented', message: 'No request handler configured on node' } });
       return;
     }
     try {

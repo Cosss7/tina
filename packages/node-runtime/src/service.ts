@@ -116,7 +116,7 @@ export class Service {
 
   createDemand(input: { projectId: string; title: string; description?: string; actor: string }): Task {
     const title = input.title.trim();
-    if (title === '') throw new ServiceError('invalid_argument', '标题不能为空');
+    if (title === '') throw new ServiceError('invalid_argument', 'Title is required');
     const task = this.#store.createTask({
       projectId: input.projectId,
       title,
@@ -136,11 +136,11 @@ export class Service {
 
   async requestPlan(input: { projectId: string; taskId: string; actor: string }): Promise<Approval> {
     const task = this.#requireTask(input.taskId);
-    if (task.projectId !== input.projectId) throw new ServiceError('not_found', '卡不在这个项目里');
-    if (task.planApproved) throw new ServiceError('conflict', '这张卡已经批过计划了');
+    if (task.projectId !== input.projectId) throw new ServiceError('not_found', 'Card does not belong to this project');
+    if (task.planApproved) throw new ServiceError('conflict', 'Card plan is already approved');
 
     const open = this.#store.listApprovals(input.projectId, 'pending').filter((approval) => approval.kind === 'plan' && approval.taskId === task.id);
-    if (open.length > 0) throw new ServiceError('conflict', '这张卡已经有一份待批的计划');
+    if (open.length > 0) throw new ServiceError('conflict', 'Card already has a pending plan');
 
     const result = await this.#runTurn(buildPlanPrompt({ title: task.title, description: task.description }));
     let plan: Plan;
@@ -169,9 +169,9 @@ export class Service {
 
   decidePlan(input: { approvalId: string; decision: 'approved' | 'rejected'; actor: string }): { approval: Approval; tasks: Task[] } {
     const approval = this.#store.getApproval(input.approvalId);
-    if (approval === undefined) throw new ServiceError('not_found', '没有这条审批');
-    if (approval.kind !== 'plan') throw new ServiceError('invalid_argument', '这不是计划审批');
-    if (approval.state !== 'pending') throw new ServiceError('conflict', '这条审批已经处理过');
+    if (approval === undefined) throw new ServiceError('not_found', 'Approval not found');
+    if (approval.kind !== 'plan') throw new ServiceError('invalid_argument', 'Approval is not for a plan');
+    if (approval.state !== 'pending') throw new ServiceError('conflict', 'Approval has already been decided');
 
     const decided = this.#store.decideApproval(approval.id, input.decision, input.actor);
     this.#store.appendEvent({
@@ -225,11 +225,11 @@ export class Service {
    */
   dispatch(input: { taskId: string; actor: string }): { run: Run; task: Task } {
     const task = this.#requireTask(input.taskId);
-    if (task.kind === 'demand') throw new ServiceError('invalid_argument', '需求卡不能直接派活，先拆成任务卡');
-    if (!task.planApproved) throw new ServiceError('conflict', '计划还没批');
+    if (task.kind === 'demand') throw new ServiceError('invalid_argument', 'Split the request into tasks before dispatching');
+    if (!task.planApproved) throw new ServiceError('conflict', 'Plan is not approved');
 
     const active = this.#store.listRuns(task.id).filter((run) => ['queued', 'dispatched', 'running'].includes(run.state));
-    if (active.length > 0) throw new ServiceError('conflict', '这张卡已经有一个在跑的 Run');
+    if (active.length > 0) throw new ServiceError('conflict', 'Card already has an active run');
 
     const run = this.#store.createRun({ taskId: task.id, agentId: this.#workerAgentId, nodeId: this.#nodeId, originatorId: input.actor });
     this.#store.appendEvent({ projectId: task.projectId, type: 'run.queued', actor: input.actor, payload: { runId: run.id, taskId: task.id } });
@@ -240,7 +240,7 @@ export class Service {
 
     this.#inflight.set(run.id, this.#execute(run, task));
     const stored = this.#store.getRun(run.id);
-    if (stored === undefined) throw new ServiceError('internal', 'Run 不见了');
+    if (stored === undefined) throw new ServiceError('internal', 'Run not found');
     return { run: stored, task: running };
   }
 
@@ -266,7 +266,7 @@ export class Service {
       this.#store.appendEvent({ projectId: task.projectId, type: 'run.completed', actor: this.#workerAgentId, payload: { runId: run.id, state: report.state } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.#store.createReport({ runId: run.id, state: 'failed', summary: `执行失败：${message}`, generated: true });
+      this.#store.createReport({ runId: run.id, state: 'failed', summary: `Run failed: ${message}`, generated: true });
       this.#store.setRunState(run.id, 'failed', { error: message });
       this.#store.appendEvent({ projectId: task.projectId, type: 'run.failed', actor: this.#workerAgentId, payload: { runId: run.id, error: message } });
     } finally {
@@ -279,10 +279,10 @@ export class Service {
   finalReview(input: { taskId: string; decision: 'approved' | 'rejected'; actor: string; note?: string }): Task {
     const task = this.#requireTask(input.taskId);
     const latest = this.#store.latestReport(task.id);
-    if (latest === undefined) throw new ServiceError('conflict', '还没有报告可以审');
+    if (latest === undefined) throw new ServiceError('conflict', 'No report available for review');
 
     const existing = this.#store.finalApproval(task.id);
-    if (existing?.state === 'approved') throw new ServiceError('conflict', '这张卡已经终审通过了');
+    if (existing?.state === 'approved') throw new ServiceError('conflict', 'Card has already passed final review');
 
     const approval = this.#store.createApproval({
       projectId: task.projectId,
@@ -303,7 +303,7 @@ export class Service {
 
   #requireTask(taskId: string): Task {
     const task = this.#store.getTask(taskId);
-    if (task === undefined) throw new ServiceError('not_found', `没有这张卡：${taskId}`);
+    if (task === undefined) throw new ServiceError('not_found', `Card not found: ${taskId}`);
     return task;
   }
 }

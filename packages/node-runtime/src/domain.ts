@@ -57,15 +57,15 @@ export interface Plan {
 }
 
 export function parsePlan(text: string): Plan {
-  const raw = extractJson(text, 'Router 计划');
+  const raw = extractJson(text, 'Router plan');
   const summary = typeof raw.summary === 'string' ? raw.summary : '';
-  if (!Array.isArray(raw.cards) || raw.cards.length === 0) throw new Error('计划里没有 cards');
+  if (!Array.isArray(raw.cards) || raw.cards.length === 0) throw new Error('Plan cards must be a non-empty array');
   const cards = raw.cards.map((item, index) => {
-    if (typeof item !== 'object' || item === null) throw new Error(`cards[${index}] 不是对象`);
+    if (typeof item !== 'object' || item === null) throw new Error(`cards[${index}] must be an object`);
     const card = item as Record<string, unknown>;
-    if (typeof card.title !== 'string' || card.title === '') throw new Error(`cards[${index}].title 缺失`);
+    if (typeof card.title !== 'string' || card.title === '') throw new Error(`cards[${index}].title is required`);
     const acceptance = Array.isArray(card.acceptance) ? card.acceptance.filter((entry): entry is string => typeof entry === 'string') : [];
-    if (acceptance.length === 0) throw new Error(`cards[${index}] 没有验收标准`);
+    if (acceptance.length === 0) throw new Error(`cards[${index}] must include acceptance criteria`);
     const deps = Array.isArray(card.deps) ? card.deps.filter((entry): entry is string => typeof entry === 'string') : [];
     return {
       key: typeof card.key === 'string' && card.key !== '' ? card.key : `c${index + 1}`,
@@ -94,13 +94,13 @@ export interface WorkerReport {
 }
 
 export function parseReport(text: string): WorkerReport {
-  const raw = extractJson(text, 'Worker 报告');
+  const raw = extractJson(text, 'Worker report');
   const state = raw.state;
   if (state !== 'done' && state !== 'blocked' && state !== 'failed') {
-    throw new Error(`报告的 state 只能是 done / blocked / failed，收到 ${String(state)}`);
+    throw new Error(`Report state must be done, blocked, or failed; got ${String(state)}`);
   }
   const summary = typeof raw.summary === 'string' ? raw.summary : '';
-  if (summary === '') throw new Error('报告没有 summary');
+  if (summary === '') throw new Error('Report summary is required');
   const decisions = Array.isArray(raw.decisions) ? raw.decisions.filter((entry): entry is string => typeof entry === 'string') : [];
   const blockers = Array.isArray(raw.blockers) ? raw.blockers.filter((entry): entry is string => typeof entry === 'string') : [];
   const artifacts: Array<{ path: string; note?: string }> = [];
@@ -138,7 +138,7 @@ function extractJson(text: string, label: string): Record<string, unknown> {
       // 换下一个候选
     }
   }
-  throw new Error(`${label}里找不到合法 JSON`);
+  throw new Error(`No valid JSON object found in ${label}`);
 }
 
 function matchBrace(text: string, start: number): number {

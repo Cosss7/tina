@@ -358,7 +358,7 @@ export class Store {
   decideApproval(id: string, state: 'approved' | 'rejected', decidedBy: string): Approval {
     this.#db.prepare('update approval set state = ?, decided_at = ?, decided_by = ? where id = ?').run(state, now(), decidedBy, id);
     const approval = this.getApproval(id);
-    if (approval === undefined) throw new Error(`审批 ${id} 不见了`);
+    if (approval === undefined) throw new Error(`Approval not found: ${id}`);
     return approval;
   }
 

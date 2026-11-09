@@ -28,13 +28,13 @@ const service = new Service({
 
 const connection = new NodeConnection(config, {
   onOpen: () => {
-    console.log(`已连上控制面 ${config.controlPlaneUrl}，托管 ${config.projects.length} 个项目`);
+    console.log(`Connected to control plane at ${config.controlPlaneUrl}; projects: ${config.projects.length}`);
   },
   onClose: (reason) => {
-    console.log(`与控制面断开（${reason}），重试中`);
+    console.log(`Disconnected from control plane (${reason}); reconnecting`);
   },
   onError: (error) => {
-    console.error(`连接出错：${error.message}`);
+    console.error(`Connection error: ${error.message}`);
   },
   onRequest: createRpcHandler(service),
 });
@@ -47,7 +47,7 @@ function shutdown(): void {
   stopping = true;
   connection.stop();
   store.close();
-  console.log('已停止');
+  console.log('Stopped');
   process.exit(0);
 }
 
