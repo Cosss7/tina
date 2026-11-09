@@ -17,6 +17,7 @@ var (
 	ErrClosed         = errors.New("runtime is closed")
 	ErrConflict       = errors.New("command or session identity conflict")
 	ErrStaleActivity  = errors.New("activity does not belong to the current execution")
+	ErrUncertain      = errors.New("execution or resource cleanup is unproven")
 )
 
 type Definition struct {

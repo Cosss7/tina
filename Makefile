@@ -1,4 +1,4 @@
-# H0 启动链路与 P1 Go 契约的验证入口。离线可跑，不调真实模型。
+# Go 控制面、tinad 与保留的 H0 基线验证入口。离线可跑，不调真实模型。
 # 依赖先装一次：pnpm install（Go 模块第一次 build 时拉）。
 #
 # USERPROFILE / LOCALAPPDATA 是给 Windows 版 go.exe 补的：make 的配方环境里没有
@@ -17,6 +17,7 @@ endif
 TSC := node ./node_modules/typescript/bin/tsc
 EXE := $(shell go env GOEXE)
 BIN := .build/control-plane$(EXE)
+TINAD_BIN := .build/tinad$(EXE)
 
 .PHONY: verify web build typecheck test up demo clean
 
@@ -31,6 +32,7 @@ web:
 build: web
 	@mkdir -p .build
 	go -C services/control-plane build -o ../../$(BIN) .
+	go -C services/tinad build -o ../../$(TINAD_BIN) .
 
 typecheck:
 	$(TSC) -p tsconfig.json
