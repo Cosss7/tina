@@ -4,6 +4,7 @@
 > 本文档回答三个问题：产品故事、架构设计、技术选型。
 > 控制面维护项目权威数据，`tinad` 管理 Agent 执行，取消“家节点”模型。控制面、tinad 与普通适配器使用 Go；dsh 进程内插件按其扩展机制使用 TypeScript。
 > 普通适配器默认采用 tinad 内部 Go 模块，按引擎接口或协议族复用；特殊 SDK 接入按需外置。实现时读取 [引擎适配契约](engine-adapter-contract.md)。
+> 工程架构、数据归属与架构图见 [architecture.md](architecture.md)。
 > 实施顺序与验收见 [下一步实施修改计划](next-implementation-plan.md)。历史决策见 [决策记录](2026-11-05-design-log.md)；版本规则见 [版本号与发布](versioning.md)；已交付规格和结果见 [H0](h0.md)、[H0 验收报告](h0-report.md)。
 
 ---
