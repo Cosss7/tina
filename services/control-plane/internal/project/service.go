@@ -69,12 +69,15 @@ func (s *Service) ConfigureAgent(ctx context.Context, projectID, agentID, name, 
 		if err != nil {
 			return err
 		}
-		var active int
-		if err := tx.QueryRowContext(ctx, "select count(*) from run where project_id=? and state in ('dispatched','running') and json_extract(body,'$.agentId')=?", projectID, agentID).Scan(&active); err != nil {
+		attempts, err := many[Run](ctx, tx, "select body from run where project_id=? and json_extract(body,'$.agentId')=?", projectID, agentID)
+		if err != nil {
 			return err
 		}
-		if active != 0 {
-			return problem("conflict", "Agent has a dispatched or running request; reconcile it before changing execution configuration")
+		for _, prior := range attempts {
+			unproven := prior.InstanceID != "" && terminal(prior.State) && prior.Admission != p.Rejected && (prior.Stop == nil || !prior.Stop.ConfirmsStop())
+			if prior.State == "dispatched" || prior.State == "running" || prior.NeedsReconciliation || unproven {
+				return problem("conflict", "Agent has unresolved execution or cleanup; reconcile it before changing execution configuration")
+			}
 		}
 		agent.Name, agent.EngineID, agent.NodeID, agent.Cwd = name, engineID, nodeID, cwd
 		if len(selection) > 0 {

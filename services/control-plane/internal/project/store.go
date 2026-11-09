@@ -47,9 +47,13 @@ create table if not exists execution_fact (
  primary key(node_id,message_id));
 create unique index if not exists execution_sequence on execution_fact(node_id,instance_id,seq) where seq>0;
 create table if not exists cancel_request(id text primary key,run_id text not null unique references run(id),state text not null,body text not null);
+create table if not exists migration (fingerprint text primary key,body text not null);
 `
 
-type Service struct{ db *sql.DB }
+type Service struct {
+	db       *sql.DB
+	filename string
+}
 
 func Open(filename string) (*Service, error) {
 	if filename == "" {
@@ -78,7 +82,7 @@ func Open(filename string) (*Service, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	s := &Service{db: db}
+	s := &Service{db: db, filename: filename}
 	fail := func(err error) (*Service, error) { db.Close(); return nil, err }
 	var format int
 	if err := db.QueryRow("pragma user_version").Scan(&format); err != nil {

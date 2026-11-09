@@ -47,7 +47,9 @@ func (r *Runtime) connect(lifetime context.Context) error {
 		defer cancel()
 		return conn.Write(callCtx, websocket.MessageText, frame)
 	}
+	r.mu.Lock()
 	registration, err := p.Encode(newID(), r.registration)
+	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -91,6 +93,8 @@ func (r *Runtime) connect(lifetime context.Context) error {
 		case err := <-errors:
 			return err
 		case <-r.wake:
+		case <-r.reconnect:
+			return nil
 		case <-ticker.C:
 			heartbeat, _ := p.Encode(newID(), p.Heartbeat{NodeID: r.config.NodeID})
 			if err := write(heartbeat); err != nil {

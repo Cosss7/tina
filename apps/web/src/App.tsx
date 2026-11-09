@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, COLUMNS, type ApprovalView, type BoardView, type CardView, type StateView } from './api.ts';
+import { api, COLUMNS, type AgentView, type ApprovalView, type BoardView, type CardView, type ReportView, type StateView } from './api.ts';
 
 export function App() {
   const [state, setState] = useState<StateView | null>(null);
+  const [connected, setConnected] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [board, setBoard] = useState<BoardView | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [agents, setAgents] = useState<AgentView[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -17,9 +19,10 @@ export function App() {
         const next = await api.state();
         if (!alive) return;
         setState(next);
+        setConnected(true);
         setProjectId((current) => current ?? next.projects[0]?.id ?? null);
       } catch {
-        if (alive) setState((current) => (current === null ? current : { ...current }));
+        if (alive) setConnected(false);
       }
     };
     void load();
@@ -35,8 +38,8 @@ export function App() {
     let alive = true;
     const load = async (): Promise<void> => {
       try {
-        const next = await api.board(projectId);
-        if (alive) setBoard(next);
+        const [next, directory] = await Promise.all([api.board(projectId), api.agents(projectId)]);
+        if (alive) { setBoard(next); setAgents(directory); }
       } catch {
         // 控制面短暂不可达时保留上一帧。
       }
@@ -87,7 +90,7 @@ export function App() {
   const cards = board?.cards ?? [];
   const approvals = board?.approvals ?? [];
   const selectedCard = cards.find((card) => card.id === selected) ?? null;
-  const online = state?.nodes.some((node) => node.online) ?? false;
+  const online = state?.nodes.some((node) => node.ready) ?? false;
 
   return (
     <div className="app">
@@ -109,10 +112,10 @@ export function App() {
               {item.name}
             </button>
           ))}
-          <button type="button" className="tab" disabled={busy || state === null} onClick={() => void createProject()}>＋项目</button>
+          <button type="button" className="tab" disabled={busy || !connected} onClick={() => void createProject()}>＋项目</button>
         </nav>
-        <div className={online ? 'status online' : 'status offline'}>
-          {state === null ? '连接中…' : online ? `${state.nodes.filter((n) => n.online).map((n) => n.name).join('/')} 在线` : '执行节点离线'}
+        <div className={online && connected ? 'status online' : 'status offline'}>
+          {!connected ? state === null ? '连接控制面…' : '控制面未连接 · 显示上次记录' : online ? `${state!.nodes.filter((n) => n.ready).map((n) => n.name).join('/')} 可执行` : '执行节点离线 · 项目可用'}
         </div>
         {state !== null && <div className="version">v{state.version}</div>}
       </header>
@@ -125,7 +128,7 @@ export function App() {
             <ApprovalBanner
               key={approval.id}
               approval={approval}
-              busy={busy}
+              busy={busy || !connected}
               onDecide={(decision) => act(() => api.decidePlan(projectId!, approval.id, decision))}
             />
           ))}
@@ -138,17 +141,16 @@ export function App() {
           event.preventDefault();
           const title = draft.trim();
           if (title === '') return;
-          setDraft('');
-          void act(() => api.createCard(projectId!, title, ''));
+          void act(async () => { await api.createCard(projectId!, title, ''); setDraft(''); });
         }}
       >
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder={project === null ? '先创建一个项目' : `在「${project.name}」建一张卡`}
-          disabled={project === null || busy}
+          disabled={project === null || busy || !connected}
         />
-        <button type="submit" disabled={project === null || busy || draft.trim() === ''}>
+        <button type="submit" disabled={project === null || busy || !connected || draft.trim() === ''}>
           建卡
         </button>
       </form>
@@ -185,11 +187,18 @@ export function App() {
 
       {selectedCard !== null && (
         <CardDetail
+          key={selectedCard.id}
           card={selectedCard}
-          busy={busy}
+          projectId={projectId!}
+          agents={agents}
+          nodes={state?.nodes ?? []}
+          busy={busy || !connected}
           onClose={() => setSelected(null)}
           onPlan={() => act(() => api.requestPlan(projectId!, selectedCard.id))}
-          onDispatch={() => act(() => api.dispatch(projectId!, selectedCard.id))}
+          onDispatch={(resume) => act(() => api.dispatch(projectId!, selectedCard.id, resume))}
+          onAssign={(id) => act(() => api.assign(projectId!, selectedCard.id, id))}
+          onCancel={(id) => act(() => api.cancel(projectId!, id))}
+          onReconcile={(id) => act(() => api.reconcile(projectId!, id))}
           onReview={(decision) => act(() => api.review(projectId!, selectedCard.id, decision))}
         />
       )}
@@ -233,18 +242,34 @@ function ApprovalBanner(props: { approval: ApprovalView; busy: boolean; onDecide
 
 function CardDetail(props: {
   card: CardView;
+  projectId: string;
+  agents: AgentView[];
+  nodes: StateView['nodes'];
   busy: boolean;
   onClose: () => void;
   onPlan: () => void;
-  onDispatch: () => void;
+  onDispatch: (resume?: string) => void;
+  onAssign: (id: string) => void;
+  onCancel: (id: string) => void;
+  onReconcile: (id: string) => void;
   onReview: (decision: 'approved' | 'rejected') => void;
 }) {
   const { card, busy, onClose, onPlan, onDispatch, onReview } = props;
-  const report = card.latestReport;
+  const [historyId, setHistoryId] = useState('');
+  const [history, setHistory] = useState<ReportView | null>(null);
+  const [historyError, setHistoryError] = useState('');
+  useEffect(() => {
+    if (!historyId) return;
+    let alive = true; setHistory(null); setHistoryError('');
+    void api.run(props.projectId, historyId).then((value) => { if (alive) setHistory(value.report); }).catch((error: unknown) => { if (alive) setHistoryError(String(error)); });
+    return () => { alive = false; };
+  }, [historyId, props.projectId, card.updatedAt]);
+  const report = historyId ? history : card.latestReport;
   const active = card.runs.some((run) => ['queued', 'dispatched', 'running'].includes(run.state));
   const canPlan = card.kind === 'demand' && !card.planApproved && !active;
-  const canDispatch = card.kind === 'task' && card.planApproved && card.status === 'todo';
+  const canDispatch = card.kind === 'task' && card.planApproved && card.status !== 'done' && !active && !card.runs.some((run) => run.needsReconciliation);
   const canReview = card.status === 'review';
+  const latest = card.runs.at(-1);
 
   return (
     <aside className="detail">
@@ -258,6 +283,10 @@ function CardDetail(props: {
         {card.kind === 'demand' ? '需求卡' : '任务卡'} · {card.id}
       </p>
       {card.description !== '' && <pre className="description">{card.description}</pre>}
+      {card.kind === 'task' && <label>执行 Agent <select aria-label="执行 Agent" disabled={busy || active} value={card.assigneeId ?? ''} onChange={(event) => props.onAssign(event.target.value)}>
+        {!props.agents.some((agent) => agent.id === card.assigneeId) && <option value={card.assigneeId ?? ''}>{card.assigneeId ?? '选择 Worker'}</option>}
+        {props.agents.filter((agent) => agent.role === 'worker').map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.engineId} · {props.nodes.some((node) => node.id === agent.nodeId && node.ready) ? '在线' : '未就绪'}</option>)}
+      </select></label>}
 
       <h4>Run</h4>
       {card.runs.length === 0 ? (
@@ -269,12 +298,19 @@ function CardDetail(props: {
               <span className={`pill ${run.state}`}>{run.state}</span>
               {run.state === 'queued' && <span className="muted"> 等待执行服务接单</span>}
               {run.error !== null && <span className="muted"> {run.error}</span>}
+              {run.cancellation && <p>取消请求：{run.cancellation.state}（{run.cancellation.admission ?? '等待回执'}）</p>}
+              {run.needsReconciliation && <p className="banner error">待核查：{run.diagnostic || '执行或清理结果尚未确认，请核查工作目录和外部状态。'}</p>}
+              {run.stop && <p className="muted">停止方式 {run.stop.mode} · 主进程 {run.stop.root} · 工具进程 {run.stop.workload} · {run.stop.sessionUsable ? '会话可继续' : '续跑需恢复原生会话'}</p>}
+              {['queued', 'dispatched', 'running'].includes(run.state) && <button type="button" disabled={busy || !!run.cancellation} onClick={() => props.onCancel(run.id)}>{run.state === 'queued' ? '撤回排队' : '请求取消'}</button>}
+              {run.needsReconciliation && <button type="button" disabled={busy} onClick={() => props.onReconcile(run.id)}>重新对账</button>}
             </li>
           ))}
         </ul>
       )}
 
       <h4>报告</h4>
+      {card.runs.length > 1 && <select aria-label="报告版本" value={historyId} onChange={(event) => setHistoryId(event.target.value)}><option value="">最新报告</option>{card.runs.map((run, index) => <option key={run.id} value={run.id}>第 {index + 1} 次 · {run.state}</option>)}</select>}
+      {historyError && <p className="banner error">{historyError}</p>}
       {report === null ? (
         <p className="muted">还没有报告</p>
       ) : (
@@ -324,10 +360,11 @@ function CardDetail(props: {
           </button>
         )}
         {canDispatch && (
-          <button type="button" disabled={busy} onClick={onDispatch}>
+          <button type="button" disabled={busy} onClick={() => onDispatch()}>
             派给 worker
           </button>
         )}
+        {canDispatch && latest?.handle && latest.handle.metadata?.resume !== 'false' && <button type="button" disabled={busy} onClick={() => onDispatch(latest.id)}>恢复原生会话续跑</button>}
         {canReview && (
           <>
             <button type="button" disabled={busy} onClick={() => onReview('approved')}>

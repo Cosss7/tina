@@ -23,8 +23,29 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+          cache-dependency-path: |
+            services/control-plane/go.sum
+            services/tinad/go.sum
 
       - run: pnpm install --frozen-lockfile
 
-      # make verify 全程离线：不访问网络、不调真实模型，引擎一律用 fake。
+      - name: Download Go dependencies
+        run: |
+          go -C services/control-plane mod download
+          go -C services/tinad mod download
+
+      # 安装后离线验证；真实模型验收必须显式开启，不进入 CI。
       - run: make verify
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          GOTOOLCHAIN: local
+
+      - name: Go race checks
+        run: |
+          go -C services/control-plane test -race ./...
+          go -C services/tinad test -race ./...
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          GOTOOLCHAIN: local

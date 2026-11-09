@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,6 +47,16 @@ func TestSDKFixture(t *testing.T) {
 		switch request.Method {
 		case "initialize":
 		case "session/resume":
+			if len(os.Args) > 0 && stringsContain(os.Args, "--old-sdk") {
+				delete(response, "result")
+				response["error"] = map[string]any{"message": "unknown DeepSeek Harness SDK runtime method: session/resume"}
+				break
+			}
+			if request.Params.SessionID == "" {
+				delete(response, "result")
+				response["error"] = map[string]any{"message": "session/resume requires a non-empty sessionId string"}
+				break
+			}
 			if _, err := os.Stat(nativePath); err != nil {
 				delete(response, "result")
 				response["error"] = map[string]any{"message": "history not found"}
@@ -71,6 +82,52 @@ func TestSDKFixture(t *testing.T) {
 		encoder.Encode(response)
 	}
 	os.Exit(0)
+}
+
+func stringsContain(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLegacySDKResumeIsNarrowedWithoutCreatingReplacement(t *testing.T) {
+	directory := t.TempDir()
+	driver := &Driver{Options: Options{Command: []string{os.Args[0], "-test.run=TestSDKFixture", "--", "--sdk-fixture", directory, "--old-sdk"}, Home: directory}}
+	var registry engine.Registry
+	if err := registry.Register(driver); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	options := engine.OpenOptions{SessionID: "old", Config: p.SessionConfig{EngineID: "dsh", Cwd: directory}}
+	session, err := registry.Open(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close(ctx)
+	input := p.Input{CommandID: "legacy", Execution: p.Execution{ProjectID: "p", RunID: "r", AgentID: "a", NodeID: "n", SessionID: "old", ActivityID: "turn"}, InstanceID: session.Info().InstanceID, Text: "normal"}
+	if _, err := session.Submit(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	var result *p.Result
+	for result == nil {
+		select {
+		case update := <-session.Updates():
+			result = update.Result
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if session.Info().Capabilities.Resume || result.Handle.Metadata["resume"] != "false" {
+		t.Fatal("unsupported capability advertised")
+	}
+	session.Close(ctx)
+	if _, err := registry.Resume(ctx, *result.Handle, options); !errors.Is(err, engine.ErrUnsupported) {
+		t.Fatal(err)
+	}
 }
 func TestNativeSessionIdentityResumeAndProcessCancel(t *testing.T) {
 	directory := t.TempDir()

@@ -1,7 +1,7 @@
 # Tina 架构
 
-> 修订 5 · 2026-11-09 · P1–P5 已接通 Go 控制面、tinad、取消与异常对账
-> 项目数据不再由 TS 节点托管；一条命令启动和迁移验收在 P6 收尾。
+> 修订 6 · 2026-11-10 · P1–P6 已实现；阶段验收见 [迁移报告](architecture-migration-report.md)。
+> 项目数据由 Go 控制面维护，Go tinad 承载执行；本地启动与旧库导入见 [启动说明](../README.md)。
 > 修改控制面、tinad、共享协议或引擎接入前读取本文。实施阶段见 [下一步实施修改计划](next-implementation-plan.md)，适配操作语义见 [引擎适配契约](engine-adapter-contract.md)，产品目标见 [vision.md](vision.md)。
 
 ## 1. 总体结构
@@ -139,10 +139,8 @@ Router 评审、追问和外部事件使用相同的业务入口与执行路径�
 | `services/tinad` | Go 执行服务、适配注册表、会话与进程管理 |
 | `packages/protocol` | 控制面与 tinad 共用的 Go 执行消息及语言无关线格式 |
 | `apps/web`、`apps/cli` | 保持 TS，分别访问控制面与启动组件 |
-| 原 `packages/node-runtime`、`engine-port`、`engine-fake`、`engine-dsh` | H0 行为基线，相关业务和执行职责迁移后切换生产入口 |
+| `packages/node-runtime`、`engine-port`、`engine-fake` | 保留的 H0 测试基线与验收；旧 TS 节点入口、业务 RPC 和 dsh 适配器已移除 |
 
-先完成 P1 的消息契约、Go 适配接口与离线契约验证，再做 P2 的控制面项目存储和业务迁移，随后按实施计划完成 tinad、闭环、取消对账与切换。P1 建立可复用模块，不提前宣称 H0 已切换为新架构。
-
-P1–P4 已提供共享 Go 协议、控制面项目存储与业务、Go tinad、fake/dsh 内部适配、进程监管、持久回传和自动派发。两个独立 tinad 的任务闭环通过离线验证，控制面重启后保留原尝试并对账。取消与异常处置在 P5 完成，CLI 全栈启动及迁移在 P6 收尾。当前 API 见 [控制面项目服务](control-plane.md)，执行配置见 [tinad](tinad.md)，消息规则见 [执行协议 v1](execution-protocol.md)。
+P1–P6 已提供共享 Go 协议、控制面项目存储与业务、Go tinad、内部适配、进程监管、持久回传、自动派发、取消对账、界面操作、一条命令启动和 H0 文件库导入。Windows Router 与 WSL Linux Worker 使用独立执行库完成真实跨环境闭环。当前 API 见 [控制面项目服务](control-plane.md)，执行配置见 [tinad](tinad.md)，消息规则见 [执行协议 v1](execution-protocol.md)，验证范围与产品限制见 [迁移报告](architecture-migration-report.md)。
 
 H0 规格和验收结果保持历史内容。`vision.md` 说明产品与架构共识，本文提供工程阅读入口，适配契约定义操作语义，实施计划规定阶段与验收。

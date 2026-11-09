@@ -36,7 +36,6 @@ func newHandler(projects *project.Service, hub *Hub, static fs.FS) http.Handler 
 		writeJSON(w, map[string]any{"ok": true, "version": version})
 	})
 	mux.HandleFunc("GET /api/state", a.state)
-	mux.HandleFunc("GET /ws/node", hub.ServeNodeWS)
 	mux.HandleFunc("GET /ws/tinad", a.serveExecution)
 	mux.HandleFunc("POST /api/nodes/enroll", a.enrollNode)
 	mux.HandleFunc("PUT /api/projects/{id}/memory", a.routerMemory)
@@ -63,6 +62,18 @@ func newHandler(projects *project.Service, hub *Hub, static fs.FS) http.Handler 
 	mux.HandleFunc("POST /api/plans/{id}/decide", a.decidePlan)
 	mux.HandleFunc("POST /api/tasks/{id}/dispatch", a.dispatchTask)
 	mux.HandleFunc("POST /api/tasks/{id}/review", a.reviewTask)
+	mux.HandleFunc("PUT /api/tasks/{id}/assignee", func(w http.ResponseWriter, r *http.Request) {
+		body, ok := decodeBody(w, r)
+		if !ok {
+			return
+		}
+		v, err := projects.AssignTask(r.Context(), stringField(body, "projectId"), r.PathValue("id"), stringField(body, "agentId"), "human:local")
+		a.reply(w, v, err, 200)
+	})
+	mux.HandleFunc("GET /api/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := projects.InspectRun(r.Context(), r.URL.Query().Get("project"), r.PathValue("id"))
+		a.reply(w, v, err, 200)
+	})
 	mux.HandleFunc("POST /api/runs/{id}/cancel", a.cancelRun)
 	mux.HandleFunc("POST /api/runs/{id}/reconcile", a.reconcileRun)
 	mux.Handle("GET /", http.FileServerFS(static))

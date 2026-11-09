@@ -8,14 +8,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const BIN = path.join(ROOT, '.build', process.platform === 'win32' ? 'control-plane.exe' : 'control-plane');
-const NODE_MAIN = path.join(ROOT, 'packages', 'node-runtime', 'src', 'main.ts');
+const TINAD = path.join(ROOT, '.build', process.platform === 'win32' ? 'tinad.exe' : 'tinad');
 
 interface NodeView {
   id: string;
@@ -48,23 +49,24 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
   const initial = await readState(port);
   assert.equal(initial?.projects.length, 2, '项目由控制面初始化，不等待节点注册');
 
-  const node = spawn(process.execPath, [NODE_MAIN], {
-    env: {
-      ...process.env,
-      TINA_CONTROL_PLANE_URL: `ws://127.0.0.1:${port}/ws/node`,
-      TINA_NODE_ID: 'e2e-node',
-      TINA_NODE_NAME: '端到端节点',
-      TINA_HEARTBEAT_MS: '200',
-      TINA_PROJECTS: JSON.stringify([{ id: 'node-only-project', name: '不得被注册创建' }]),
-    },
+  mkdirSync(path.join(ROOT, '.build'), { recursive: true });
+  const directory = mkdtempSync(path.join(ROOT, '.build', 'offline-go-'));
+  const filename = path.join(directory, 'tinad.json');
+  const token = 'offline-test-private-token-with-32-characters';
+  writeFileSync(filename, JSON.stringify({ nodeId: 'e2e-node', name: '端到端节点', token, url: `ws://127.0.0.1:${port}/ws/tinad`, database: path.join(directory, 'journal.db'), maxConcurrent: 2, roots: [directory], agents: [] }));
+  const enrollment = await fetch(`http://127.0.0.1:${port}/api/nodes/enroll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nodeId: 'e2e-node', name: '端到端节点', token }) });
+  assert.equal(enrollment.status, 200, await enrollment.clone().text());
+  const node = spawn(TINAD, ['-config', filename], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   node.on('error', (error) => { throw error; });
   const nodeLog: string[] = [];
   node.stdout.on('data', (chunk: Buffer) => nodeLog.push(chunk.toString('utf8')));
   node.stderr.on('data', (chunk: Buffer) => nodeLog.push(chunk.toString('utf8')));
-  t.after(() => {
-    node.kill();
+  t.after(async () => {
+    if (node.exitCode === null && node.signalCode === null) { const done = once(node, 'exit'); node.kill(); await done; }
+    assert.ok(directory.startsWith(path.join(ROOT, '.build') + path.sep));
+    rmSync(directory, { recursive: true, force: true });
   });
 
   const online = await waitFor(

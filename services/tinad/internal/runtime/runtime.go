@@ -45,9 +45,14 @@ type Runtime struct {
 	closed         bool
 	cancelTasks    map[string]bool
 	sessionConfigs map[string]p.SessionConfig
+	reconnect      chan struct{}
+	shutdownOnce   sync.Once
+	shutdownErr    error
 }
 
 func New(config Config, registry *engine.Registry, engines []p.EngineRegistration) (*Runtime, error) {
+	config.Roots = append([]string(nil), config.Roots...)
+	config.Agents = append([]p.AgentRegistration(nil), config.Agents...)
 	registration := p.Register{NodeID: config.NodeID, Name: config.Name, Version: "dev", MaxConcurrent: config.MaxConcurrent, Agents: config.Agents, Engines: engines}
 	if err := registration.Validate(); err != nil {
 		return nil, err
@@ -72,17 +77,17 @@ func New(config Config, registry *engine.Registry, engines []p.EngineRegistratio
 	}
 	records, err := j.all()
 	if err != nil {
-		j.db.Close()
+		j.close()
 		return nil, err
 	}
 	for _, record := range records {
 		if record.Execution.NodeID != config.NodeID {
-			j.db.Close()
+			j.close()
 			return nil, fmt.Errorf("execution database belongs to another node")
 		}
 	}
 	if err := j.recover(); err != nil {
-		j.db.Close()
+		j.close()
 		return nil, err
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
@@ -93,7 +98,7 @@ func New(config Config, registry *engine.Registry, engines []p.EngineRegistratio
 			active[rec.CommandID] = true
 		}
 	}
-	return &Runtime{config: config, registry: registry, registration: registration, journal: j, sessions: map[string]engine.Session{}, active: active, wake: make(chan struct{}, 1), ctx: lifetime, cancel: cancel, cancelTasks: map[string]bool{}, sessionConfigs: map[string]p.SessionConfig{}}, nil
+	return &Runtime{config: config, registry: registry, registration: registration, journal: j, sessions: map[string]engine.Session{}, active: active, wake: make(chan struct{}, 1), reconnect: make(chan struct{}, 1), ctx: lifetime, cancel: cancel, cancelTasks: map[string]bool{}, sessionConfigs: map[string]p.SessionConfig{}}, nil
 }
 func (r *Runtime) notify() {
 	select {
@@ -164,9 +169,6 @@ func (r *Runtime) dispatch(ctx context.Context, d p.Dispatch) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed {
-		return engine.ErrClosed
-	}
 	prior, exists, err := r.journal.get(d.CommandID)
 	if err != nil {
 		return err
@@ -180,6 +182,10 @@ func (r *Runtime) dispatch(ctx context.Context, d p.Dispatch) error {
 		return err
 	}
 	receipt := p.Receipt{CommandID: d.CommandID, Execution: d.Execution, Admission: p.Admitted}
+	if r.closed {
+		receipt.Admission = p.Rejected
+		receipt.Failure = &p.Failure{Code: "node_shutdown", Message: "node is shutting down; no input was submitted"}
+	}
 	if err := r.allow(d); err != nil {
 		receipt.Admission = p.Rejected
 		receipt.Failure = &p.Failure{Code: "local_policy", Message: err.Error()}
@@ -552,9 +558,14 @@ func (r *Runtime) reconcile(request p.ReconcileRequest) error {
 	r.notify()
 	return err
 }
-func (r *Runtime) Close() error {
+func (r *Runtime) quiesce() error {
 	r.mu.Lock()
 	r.closed = true
+	r.registration.Agents = []p.AgentRegistration{}
+	select {
+	case r.reconnect <- struct{}{}:
+	default:
+	}
 	r.cancel()
 	sessions := []engine.Session{}
 	for _, s := range r.sessions {
@@ -582,7 +593,74 @@ func (r *Runtime) Close() error {
 		}
 	}
 	r.mu.Unlock()
-	return errors.Join(append(problems, r.journal.db.Close())...)
+	return errors.Join(problems...)
+}
+func (r *Runtime) Quiesce() error {
+	r.shutdownOnce.Do(func() { r.shutdownErr = r.quiesce() })
+	return r.shutdownErr
+}
+func (r *Runtime) Close() error { return errors.Join(r.Quiesce(), r.journal.close()) }
+func (r *Runtime) Flush(ctx context.Context) error {
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		frames, err := r.journal.pending()
+		if err != nil {
+			return err
+		}
+		if len(frames) == 0 {
+			return nil
+		}
+		r.notify()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (r *Runtime) UpdateAuthorization(roots []string, agents []p.AgentRegistration) error {
+	canonical := make([]string, len(roots))
+	if len(roots) == 0 {
+		return fmt.Errorf("at least one local root is required")
+	}
+	for i, root := range roots {
+		absolute, err := filepath.Abs(root)
+		if err != nil {
+			return err
+		}
+		absolute, err = filepath.EvalSymlinks(absolute)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(absolute)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("local root is not a directory")
+		}
+		canonical[i] = absolute
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return engine.ErrClosed
+	}
+	registration := r.registration
+	registration.Agents = append([]p.AgentRegistration(nil), agents...)
+	if err := registration.Validate(); err != nil {
+		return err
+	}
+	if reflect.DeepEqual(r.config.Roots, canonical) && reflect.DeepEqual(r.config.Agents, agents) {
+		return nil
+	}
+	r.config.Roots = canonical
+	r.config.Agents = append([]p.AgentRegistration(nil), agents...)
+	r.registration = registration
+	select {
+	case r.reconnect <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 // Caller holds mu. Releasing an idle native runtime gets its own fact and cannot

@@ -158,7 +158,15 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 	if err := s.rpc.call(callCtx, "initialize", init, nil); err != nil {
 		return cleanup(fmt.Errorf("initialize dsh: %w", err))
 	}
+	// An invalid argument probes method availability without opening a session or
+	// submitting input. Older SDKs report unknown method; their handles remain
+	// inspectable, but must not advertise native resume.
+	featureErr := s.rpc.call(callCtx, "session/resume", map[string]any{}, nil)
+	s.resumeSupported = featureErr != nil && strings.Contains(featureErr.Error(), "session/resume requires a non-empty sessionId")
 	if resume != nil {
+		if !s.resumeSupported {
+			return cleanup(engine.ErrUnsupported)
+		}
 		if resume.EngineID != "dsh" || resume.SessionID != o.SessionID {
 			return cleanup(engine.ErrResumeRejected)
 		}
@@ -176,22 +184,23 @@ func (d *Driver) open(ctx context.Context, o engine.OpenOptions, resume *p.Sessi
 }
 
 type Session struct {
-	mu             sync.Mutex
-	info           engine.SessionInfo
-	nativeID, home string
-	cwd            string
-	scope          *process.Scope
-	rpc            *rpc
-	updates        chan engine.Update
-	active         *p.Input
-	output         string
-	usage          p.Usage
-	seq            uint64
-	closed         bool
-	stopping       bool
-	stdin          *os.File
-	commands       map[string]p.Receipt
-	fingerprints   map[string]string
+	mu              sync.Mutex
+	info            engine.SessionInfo
+	nativeID, home  string
+	cwd             string
+	scope           *process.Scope
+	rpc             *rpc
+	updates         chan engine.Update
+	active          *p.Input
+	output          string
+	usage           p.Usage
+	seq             uint64
+	closed          bool
+	stopping        bool
+	resumeSupported bool
+	stdin           *os.File
+	commands        map[string]p.Receipt
+	fingerprints    map[string]string
 }
 
 func (s *Session) Info() engine.SessionInfo {
@@ -205,14 +214,14 @@ func (s *Session) Info() engine.SessionInfo {
 	}
 	if info.Handle != nil {
 		h := *info.Handle
-		h.Metadata = map[string]string{"home": s.home, "cwd": s.cwd}
+		h.Metadata = map[string]string{"home": s.home, "cwd": s.cwd, "resume": fmt.Sprint(s.resumeSupported)}
 		info.Handle = &h
 	}
 	return info
 }
 func (s *Session) setHandle(home string) {
-	s.info.Handle = &p.SessionHandle{EngineID: "dsh", SessionID: s.info.SessionID, NativeID: s.nativeID, Metadata: map[string]string{"home": home, "cwd": s.cwd}}
-	s.info.Capabilities.Resume = true
+	s.info.Handle = &p.SessionHandle{EngineID: "dsh", SessionID: s.info.SessionID, NativeID: s.nativeID, Metadata: map[string]string{"home": home, "cwd": s.cwd, "resume": fmt.Sprint(s.resumeSupported)}}
+	s.info.Capabilities.Resume = s.resumeSupported
 }
 func (s *Session) Updates() <-chan engine.Update { return s.updates }
 func (s *Session) Submit(ctx context.Context, in p.Input) (p.Receipt, error) {
@@ -260,6 +269,9 @@ func (s *Session) Submit(ctx context.Context, in p.Input) (p.Receipt, error) {
 	receipt := p.Receipt{CommandID: in.CommandID, Execution: in.Execution, InstanceID: in.InstanceID, Admission: p.Unknown}
 	if err != nil || reply.MessageID == "" {
 		receipt.Failure = &p.Failure{Code: "native_acceptance_unknown", Message: "native prompt acceptance requires reconciliation"}
+		if err != nil {
+			receipt.Failure.Message += ": " + err.Error()
+		}
 	} else {
 		receipt.Admission = p.Accepted
 	}
@@ -299,7 +311,8 @@ func (s *Session) onEvent(params json.RawMessage) {
 	}
 	var data struct {
 		Reason struct {
-			Kind string `json:"kind"`
+			Kind  string     `json:"kind"`
+			Error *p.Failure `json:"error"`
 		} `json:"reason"`
 		Message struct {
 			Content []struct {
@@ -357,7 +370,11 @@ func (s *Session) onEvent(params json.RawMessage) {
 		if data.Reason.Kind == "completed" {
 			s.finish(p.Completed, nil, nil)
 		} else if !s.stopping {
-			s.finish(p.Failed, &p.Failure{Code: "native_" + data.Reason.Kind, Message: "dsh turn ended with reason " + data.Reason.Kind}, nil)
+			failure := &p.Failure{Code: "native_" + data.Reason.Kind, Message: "dsh turn ended with reason " + data.Reason.Kind}
+			if data.Reason.Error != nil && data.Reason.Error.Message != "" {
+				failure.Message += ": " + data.Reason.Error.Message
+			}
+			s.finish(p.Failed, failure, nil)
 		}
 	}
 }

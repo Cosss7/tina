@@ -7,10 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@tina/engine-port": "workspace:*",
-    "ws": "^8.18.3"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@tina/engine-port": "workspace:*"
   }
 }

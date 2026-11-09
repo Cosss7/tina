@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/Cosss7/tina/services/tinad/internal/filelock"
+
 	p "github.com/Cosss7/tina/packages/protocol"
 	_ "modernc.org/sqlite"
 )
@@ -28,11 +30,13 @@ type record struct {
 	Cleanup         *p.StopEvidence `json:"cleanup,omitempty"`
 }
 type journal struct {
-	mu sync.Mutex
-	db *sql.DB
+	mu   sync.Mutex
+	db   *sql.DB
+	lock *filelock.Lock
 }
 
 func openJournal(filename string) (*journal, error) {
+	var ownership *filelock.Lock
 	dsn := filename + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	if filename != ":memory:" {
 		absolute, err := filepath.Abs(filename)
@@ -42,6 +46,10 @@ func openJournal(filename string) (*journal, error) {
 		if err := os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
 			return nil, err
 		}
+		ownership, err = filelock.Acquire(absolute + ".lock")
+		if err != nil {
+			return nil, fmt.Errorf("execution journal is already owned or unavailable: %w", err)
+		}
 		u := url.URL{Scheme: "file", Path: filepath.ToSlash(absolute), RawQuery: "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"}
 		if len(u.Path) > 1 && u.Path[1] == ':' {
 			u.Path = "/" + u.Path
@@ -50,9 +58,18 @@ func openJournal(filename string) (*journal, error) {
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		if ownership != nil {
+			ownership.Close()
+		}
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	success := false
+	defer func() {
+		if !success && ownership != nil {
+			ownership.Close()
+		}
+	}()
 	var application, version, tables int
 	if err := db.QueryRow("pragma application_id").Scan(&application); err != nil {
 		db.Close()
@@ -92,7 +109,15 @@ pragma user_version=1;`); err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &journal{db: db}, nil
+	success = true
+	return &journal{db: db, lock: ownership}, nil
+}
+func (j *journal) close() error {
+	err := j.db.Close()
+	if j.lock != nil {
+		return errors.Join(err, j.lock.Close())
+	}
+	return err
 }
 func (j *journal) get(commandID string) (record, bool, error) {
 	var r record

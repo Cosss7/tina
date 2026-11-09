@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,12 +31,49 @@ func main() {
 	}
 	dbPath := flag.String("db", defaultDB, "Control-plane database path (:memory: for tests)")
 	seedDemo := flag.Bool("seed-demo", true, "Initialize demo projects when the project store is empty")
+	importH0 := flag.String("import-h0", "", "Import a stopped H0 SQLite database and exit")
+	oldStopped := flag.Bool("h0-stopped", false, "Confirm that the H0 execution service was stopped before import")
+	backupDirectory := flag.String("backup-dir", "", "H0 snapshot directory (defaults beside the destination database)")
+	enrollConfig := flag.String("enroll-config", "", "Enroll node identity from a private tinad JSON configuration and exit")
 	flag.Parse()
 	projects, err := project.Open(*dbPath)
 	if err != nil {
 		log.Fatalf("Open project store %q: %v", *dbPath, err)
 	}
 	defer projects.Close()
+	if *importH0 != "" {
+		directory := *backupDirectory
+		if directory == "" {
+			directory = filepath.Join(filepath.Dir(*dbPath), "migration-backups")
+		}
+		result, err := projects.ImportH0(context.Background(), *importH0, directory, *oldStopped)
+		if err != nil {
+			log.Fatalf("Import H0: %v", err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if *enrollConfig != "" {
+		data, err := os.ReadFile(*enrollConfig)
+		if err != nil {
+			log.Fatal(err)
+		}
+		var config struct {
+			NodeID string `json:"nodeId"`
+			Name   string `json:"name"`
+			Token  string `json:"token"`
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			log.Fatal(err)
+		}
+		if err := projects.EnrollNode(context.Background(), config.NodeID, config.Name, strings.TrimSpace(config.Token)); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Enrolled node %s", config.NodeID)
+		return
+	}
 	if *seedDemo {
 		if err := projects.SeedDemo(context.Background()); err != nil {
 			log.Fatalf("Initialize projects: %v", err)

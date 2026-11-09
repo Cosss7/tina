@@ -11,7 +11,6 @@ import (
 	"testing/fstest"
 
 	"github.com/Cosss7/tina/services/control-plane/internal/project"
-	"github.com/coder/websocket"
 )
 
 func testAPI(t *testing.T) (*project.Service, *httptest.Server) {
@@ -98,16 +97,9 @@ func TestNodeRegistrationCannotCreateOrReassignProjects(t *testing.T) {
 	if err := store.SeedDemo(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http")+"/ws/node", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.CloseNow()
-	message := `{"type":"register","nodeId":"untrusted","name":"old node","projects":[{"id":"injected","name":"injected"}]}`
-	if err := conn.Write(context.Background(), websocket.MessageText, []byte(message)); err != nil {
-		t.Fatal(err)
-	}
-	// The project catalog is independent even if registration is still in flight.
+	call(t, server, "GET", "/ws/node", "", 404, nil)
+	call(t, server, "GET", "/ws/tinad", "", 401, nil)
+	// Legacy registration is gone; unauthenticated nodes cannot enter execution.
 	var state struct {
 		Projects []map[string]any `json:"projects"`
 	}
