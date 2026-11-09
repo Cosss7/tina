@@ -38,7 +38,7 @@ export function App() {
         const next = await api.board(projectId);
         if (alive) setBoard(next);
       } catch {
-        // 节点离线时保持上一帧，别把看板清空
+        // 控制面短暂不可达时保留上一帧。
       }
     };
     void load();
@@ -67,6 +67,23 @@ export function App() {
   );
 
   const project = state?.projects.find((item) => item.id === projectId) ?? null;
+  const createProject = async (): Promise<void> => {
+    const name = window.prompt('项目名称')?.trim();
+    if (!name) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api.createProject(name);
+      setState(await api.state());
+      setBoard(null);
+      setSelected(null);
+      setProjectId(created.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   const cards = board?.cards ?? [];
   const approvals = board?.approvals ?? [];
   const selectedCard = cards.find((card) => card.id === selected) ?? null;
@@ -81,18 +98,21 @@ export function App() {
             <button
               key={item.id}
               type="button"
+              disabled={busy}
               className={item.id === projectId ? 'tab active' : 'tab'}
               onClick={() => {
                 setProjectId(item.id);
                 setSelected(null);
+                setBoard(null);
               }}
             >
               {item.name}
             </button>
           ))}
+          <button type="button" className="tab" disabled={busy || state === null} onClick={() => void createProject()}>＋项目</button>
         </nav>
         <div className={online ? 'status online' : 'status offline'}>
-          {state === null ? '连接中…' : online ? `${state.nodes.filter((n) => n.online).map((n) => n.name).join('/')} 在线` : '节点离线'}
+          {state === null ? '连接中…' : online ? `${state.nodes.filter((n) => n.online).map((n) => n.name).join('/')} 在线` : '执行节点离线'}
         </div>
         {state !== null && <div className="version">v{state.version}</div>}
       </header>
@@ -125,7 +145,7 @@ export function App() {
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder={project === null ? '等节点上线…' : `在「${project.name}」建一张卡`}
+          placeholder={project === null ? '先创建一个项目' : `在「${project.name}」建一张卡`}
           disabled={project === null || busy}
         />
         <button type="submit" disabled={project === null || busy || draft.trim() === ''}>
@@ -153,6 +173,7 @@ export function App() {
                   <span className="card-title">{card.title}</span>
                   <span className="card-meta">
                     {card.kind === 'demand' ? '需求' : '任务'}
+                    {card.runs.some((run) => run.state === 'queued') && ' · 等待执行'}
                     {card.latestReport !== null && ` · 报告 ${card.latestReport.state}`}
                   </span>
                 </button>
@@ -220,7 +241,8 @@ function CardDetail(props: {
 }) {
   const { card, busy, onClose, onPlan, onDispatch, onReview } = props;
   const report = card.latestReport;
-  const canPlan = card.kind === 'demand' && !card.planApproved;
+  const active = card.runs.some((run) => ['queued', 'dispatched', 'running'].includes(run.state));
+  const canPlan = card.kind === 'demand' && !card.planApproved && !active;
   const canDispatch = card.kind === 'task' && card.planApproved && card.status === 'todo';
   const canReview = card.status === 'review';
 
@@ -245,6 +267,7 @@ function CardDetail(props: {
           {card.runs.map((run) => (
             <li key={run.id}>
               <span className={`pill ${run.state}`}>{run.state}</span>
+              {run.state === 'queued' && <span className="muted"> 等待执行服务接单</span>}
               {run.error !== null && <span className="muted"> {run.error}</span>}
             </li>
           ))}
@@ -258,7 +281,7 @@ function CardDetail(props: {
         <div className="report">
           <div>
             <span className={`pill ${report.state}`}>{report.state}</span>
-            {report.generated && <span className="muted">（节点兜底生成）</span>}
+            {report.generated && <span className="muted">（控制面兜底生成）</span>}
           </div>
           <p>{report.summary}</p>
           {report.blockers.length > 0 && (

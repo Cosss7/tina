@@ -21,13 +21,10 @@ interface NodeView {
   id: string;
   name: string;
   online: boolean;
-  projects: string[];
 }
 interface ProjectView {
   id: string;
   name: string;
-  homeNodeId: string;
-  online: boolean;
 }
 interface State {
   nodes: NodeView[];
@@ -38,7 +35,8 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
   if (!existsSync(BIN)) throw new Error(`${BIN} 不存在，先跑 make build`);
 
   const port = await freePort();
-  const control = spawn(BIN, ['-addr', `127.0.0.1:${port}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const control = spawn(BIN, ['-addr', `127.0.0.1:${port}`, '-db', ':memory:'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  control.on('error', (error) => { throw error; });
   const controlLog: string[] = [];
   control.stdout.on('data', (chunk: Buffer) => controlLog.push(chunk.toString('utf8')));
   control.stderr.on('data', (chunk: Buffer) => controlLog.push(chunk.toString('utf8')));
@@ -46,7 +44,9 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
     control.kill();
   });
 
-  await waitFor(async () => (await health(port)) !== undefined, 10_000, '控制面起来');
+  await waitFor(() => health(port), 10_000, '控制面起来');
+  const initial = await readState(port);
+  assert.equal(initial?.projects.length, 2, '项目由控制面初始化，不等待节点注册');
 
   const node = spawn(process.execPath, [NODE_MAIN], {
     env: {
@@ -55,9 +55,11 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
       TINA_NODE_ID: 'e2e-node',
       TINA_NODE_NAME: '端到端节点',
       TINA_HEARTBEAT_MS: '200',
+      TINA_PROJECTS: JSON.stringify([{ id: 'node-only-project', name: '不得被注册创建' }]),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  node.on('error', (error) => { throw error; });
   const nodeLog: string[] = [];
   node.stdout.on('data', (chunk: Buffer) => nodeLog.push(chunk.toString('utf8')));
   node.stderr.on('data', (chunk: Buffer) => nodeLog.push(chunk.toString('utf8')));
@@ -79,10 +81,7 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
     ['网站改版', '移动端'].sort(),
     'Web 上应当看到两个项目的看板',
   );
-  assert.ok(
-    online.projects.every((project) => project.homeNodeId === 'e2e-node' && project.online),
-    '两个项目都该挂在注册上来的节点名下',
-  );
+  assert.deepEqual(online.projects, initial?.projects, '节点声明不能创建项目或更改归属');
 
   const killedAt = Date.now();
   node.kill();
@@ -98,10 +97,14 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
 
   const elapsed = Date.now() - killedAt;
   assert.ok(elapsed <= 3_000, `掉线检测用了 ${elapsed}ms，超过 3 秒`);
-  assert.ok(
-    offline.projects.every((project) => !project.online),
-    '项目也应跟着显示离线',
-  );
+  assert.deepEqual(offline.projects, initial?.projects, '节点离线不改变项目');
+  const created = await fetch(`http://127.0.0.1:${port}/api/cards`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectId: 'proj-website', title: '离线仍可建卡' }),
+  });
+  assert.equal(created.status, 201);
+  const board = await fetch(`http://127.0.0.1:${port}/api/board?project=proj-website`);
+  assert.equal(board.status, 200);
 });
 
 async function freePort(): Promise<number> {

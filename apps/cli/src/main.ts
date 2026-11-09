@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 /**
- * tina 命令。H0 只有 `up`：把控制面和节点一起拉起来，Ctrl+C 一起收掉
- *
- * 控制面是 Go 二进制，节点是 `packages/node-runtime` 的入口
- * 两边的日志都带上前缀
+ * tina up 启动持久化的 Go 控制面。Go tinad 在 P3 接入，
+ * 迁移期间不再自动启动持有旧业务库的 H0 TS 节点。
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -14,17 +12,16 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const BIN = path.join(ROOT, '.build', `control-plane${EXE}`);
-const NODE_MAIN = path.join(ROOT, 'packages', 'node-runtime', 'src', 'main.ts');
 
 interface Options {
   addr: string;
   port: number;
-  withNode: boolean;
+  dbPath: string;
 }
 
 function parseArgs(argv: string[]): Options {
   let addr = '127.0.0.1:7801';
-  let withNode = true;
+  let dbPath = process.env.TINA_CONTROL_DB || path.join(ROOT, '.tina', 'control-plane.db');
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--addr') {
@@ -33,20 +30,25 @@ function parseArgs(argv: string[]): Options {
       addr = value;
       index += 1;
     } else if (arg === '--no-node') {
-      withNode = false;
+      // Compatibility with the H0 CLI; P2 starts only the control plane.
+    } else if (arg === '--db') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('--db requires a filename or :memory:');
+      dbPath = value;
+      index += 1;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
   const port = Number(addr.split(':').pop());
   if (!Number.isInteger(port) || port <= 0) throw new Error(`Invalid port in address: ${addr}`);
-  return { addr, port, withNode };
+  return { addr, port, dbPath };
 }
 
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command !== 'up') {
-    console.log('Usage: tina up [--addr 127.0.0.1:7801] [--no-node]');
+    console.log('Usage: tina up [--addr 127.0.0.1:7801] [--db .tina/control-plane.db]');
     process.exit(command === undefined || command === '--help' ? 0 : 1);
   }
 
@@ -66,9 +68,13 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => stop(0));
   process.on('SIGTERM', () => stop(0));
 
-  const control = spawn(BIN, ['-addr', options.addr], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const control = spawn(BIN, ['-addr', options.addr, '-db', options.dbPath], { stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(control);
   pipe(control, 'Control Plane');
+  control.on('error', (error) => {
+    console.error(`[tina] Failed to spawn ${BIN}: ${error.message}`);
+    stop(1);
+  });
   control.on('exit', (code) => {
     if (!stopping) {
       console.error(`[tina] Control plane exited (code ${String(code)})`);
@@ -81,27 +87,10 @@ async function main(): Promise<void> {
     stop(1);
   });
 
-  if (options.withNode) {
-    const node = spawn(process.execPath, [NODE_MAIN], {
-      env: {
-        ...process.env,
-        TINA_CONTROL_PLANE_URL: `ws://127.0.0.1:${options.port}/ws/node`,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    children.push(node);
-    pipe(node, 'Agent Node');
-    node.on('exit', (code) => {
-      if (!stopping) {
-        console.error(`[tina] Agent node exited (code ${String(code)})`);
-        stop(code ?? 1);
-      }
-    });
-  }
-
   console.log('');
   console.log(`  Tina started: http://${options.addr}`);
-  console.log(`  Agent node: ${options.withNode ? 'started' : 'disabled (--no-node)'}`);
+  console.log(`  Project database: ${options.dbPath}`);
+  console.log('  P2 migration: execution requests remain queued until tinad is connected in P3/P4.');
   console.log('  Press Ctrl+C to stop');
   console.log('');
 }

@@ -11,26 +11,20 @@ func newTestHub(now time.Time) *Hub {
 	return hub
 }
 
-func TestRegisterMarksOnlineAndBindsProjects(t *testing.T) {
+func TestRegisterMarksNodeOnline(t *testing.T) {
 	hub := newTestHub(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-	hub.Register("node-1", "本机", "0.1.0-dev", []ProjectRef{{ID: "p1", Name: "网站改版"}, {ID: "p2", Name: "移动端"}})
+	hub.Register("node-1", "本机", "0.1.0-dev")
 
 	snap := hub.Snapshot()
 	if len(snap.Nodes) != 1 || !snap.Nodes[0].Online {
 		t.Fatalf("节点应当在线: %+v", snap.Nodes)
-	}
-	if len(snap.Projects) != 2 {
-		t.Fatalf("应当记住两个项目: %+v", snap.Projects)
-	}
-	if snap.Projects[0].HomeNodeID != "node-1" || !snap.Projects[0].Online {
-		t.Fatalf("项目应挂到节点上且在线: %+v", snap.Projects[0])
 	}
 }
 
 func TestSweepMarksOfflineAfterThreshold(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	hub := newTestHub(now)
-	hub.Register("node-1", "本机", "0", nil)
+	hub.Register("node-1", "本机", "0")
 
 	now = now.Add(2 * time.Second)
 	hub.now = func() time.Time { return now }
@@ -50,7 +44,7 @@ func TestSweepMarksOfflineAfterThreshold(t *testing.T) {
 func TestHeartbeatKeepsNodeOnline(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	hub := newTestHub(now)
-	hub.Register("node-1", "本机", "0", nil)
+	hub.Register("node-1", "本机", "0")
 
 	now = now.Add(2 * time.Second)
 	hub.now = func() time.Time { return now }
@@ -63,10 +57,25 @@ func TestHeartbeatKeepsNodeOnline(t *testing.T) {
 
 func TestDisconnectIsImmediate(t *testing.T) {
 	hub := newTestHub(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-	hub.Register("node-1", "本机", "0", nil)
+	hub.Register("node-1", "本机", "0")
 	hub.Disconnect("node-1")
 	if hub.Snapshot().Nodes[0].Online {
 		t.Fatalf("断开应当立刻离线")
+	}
+}
+
+func TestOldConnectionCannotDisconnectOrRefreshReplacement(t *testing.T) {
+	hub := NewHub()
+	old := hub.Register("n", "old", "0")
+	hub.Register("n", "new", "0")
+	hub.disconnectGeneration("n", old)
+	if !hub.Snapshot().Nodes[0].Online {
+		t.Fatal("old connection disconnected new one")
+	}
+	hub.Disconnect("n")
+	hub.heartbeatGeneration("n", old)
+	if hub.Snapshot().Nodes[0].Online {
+		t.Fatal("old connection revived node")
 	}
 }
 

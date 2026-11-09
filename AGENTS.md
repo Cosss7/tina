@@ -6,9 +6,9 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 
 **H0 已完成**，产出 `0.1.0`：单机跑通"建卡 → Router 拆卡 → 派 worker → 收报告 → 人终审"，真 dsh 手工验收通过。结果与遗留问题见 `docs/h0-report.md`。
 
-**下一阶段是 H1 = `1.0.0`**。按 [docs/next-implementation-plan.md](docs/next-implementation-plan.md) 迁移：P1 的 Go 消息、适配接口和离线 fake 已完成，下一步 P2 将项目存储与业务移到控制面。协议字段和状态规则见 [docs/execution-protocol.md](docs/execution-protocol.md)；适配、取消与恢复行为见 [docs/engine-adapter-contract.md](docs/engine-adapter-contract.md)。
+**下一阶段是 H1 = `1.0.0`**。按 [docs/next-implementation-plan.md](docs/next-implementation-plan.md) 迁移：P1 契约与 P2 控制面存储/业务已完成，下一步 P3 接通 Go tinad。项目 API、数据库和当前启动方式见 [docs/control-plane.md](docs/control-plane.md)；消息规则见 [docs/execution-protocol.md](docs/execution-protocol.md)，适配行为见 [docs/engine-adapter-contract.md](docs/engine-adapter-contract.md)。
 
-“家节点”和“先装回 Effect”属于旧方案；新实现不引入 Effect。H0 代码尚未完成架构迁移，不能将目标文档视为当前功能已实现。
+“家节点”和“先装回 Effect”属于旧方案；新实现不引入 Effect。当前启动持久化控制面，模型请求先排队，自动执行闭环待 P3/P4 恢复，不能将目标文档视为全部功能已实现。
 
 - 动架构或产品方向之前读 `docs/vision.md`。
 - 打 tag、改版本号、写发布说明之前读 `docs/versioning.md`。
@@ -20,10 +20,10 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 apps/web                 React 前端（Web 与桌面共用）
 apps/desktop             Electron 外壳（H0 不做）
 apps/cli                 tina 命令（up / attach）
-services/control-plane   Go 控制面
+services/control-plane   Go 控制面、SQLite 项目库、业务与持久执行队列
 services/tinad           Go 适配接口、注册表和 fake（服务接线与真实引擎待迁移）
 packages/protocol        共享 Go 执行消息、JSON v1 编解码和校验
-packages/node-runtime    H0 TS 节点（业务与执行职责待迁移）
+packages/node-runtime    H0 TS 行为基线（生产项目 API 已迁到 Go）
 packages/engine-port     H0 引擎接口与 TCP 传输
 packages/engine-dsh      H0 进程外 TS 适配器（内部插件尚未实现）
 packages/ui-kit          组件库
@@ -32,6 +32,6 @@ packages/ui-kit          组件库
 ## Commands
 
 ```sh
-tina up         # 一条命令起全栈
+tina up         # 启动持久化控制面；P2 的执行请求保持 queued
 make verify     # 构建、类型检查和离线测试，进 CI
 ```

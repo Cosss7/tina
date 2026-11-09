@@ -1,4 +1,4 @@
-/** 控制面 REST 的薄客户端。H0 只有这几条，全部同步走 fetch。 */
+/** 控制面项目 API 的薄客户端。模型请求返回待执行 Run。 */
 
 export interface NodeView {
   id: string;
@@ -11,8 +11,6 @@ export interface NodeView {
 export interface ProjectView {
   id: string;
   name: string;
-  homeNodeId: string;
-  online: boolean;
 }
 
 export interface StateView {
@@ -89,11 +87,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   state: () => request<StateView>('/api/state'),
+  createProject: (name: string) => request<ProjectView>('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }),
   board: (projectId: string) => request<BoardView>(`/api/board?project=${encodeURIComponent(projectId)}`),
   createCard: (projectId: string, title: string, description: string) =>
     request<CardView>('/api/cards', { method: 'POST', body: JSON.stringify({ projectId, title, description }) }),
   requestPlan: (projectId: string, taskId: string) =>
-    request<ApprovalView>('/api/plans', { method: 'POST', body: JSON.stringify({ projectId, taskId }) }),
+    request<{ run: RunView }>('/api/plans', { method: 'POST', body: JSON.stringify({ projectId, taskId }) }),
   decidePlan: (projectId: string, approvalId: string, decision: 'approved' | 'rejected') =>
     request<unknown>(`/api/plans/${approvalId}/decide`, { method: 'POST', body: JSON.stringify({ projectId, decision }) }),
   dispatch: (projectId: string, taskId: string) =>

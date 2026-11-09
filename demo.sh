@@ -1,150 +1,45 @@
 #!/usr/bin/env bash
-# 从空库跑到"卡片进已完成"，每一步状态打在终端上。
-#
-# 它自己起控制面和节点，跑完收掉；不需要先 make up。默认用内存库，
-# 想留证据就 TINA_DB=.tina/demo.db bash demo.sh（记得先建目录）。
-#
-# 默认引擎是 fake。换成真 dsh：
-#   TINA_ENGINE_BIN=<packages/engine-dsh/src/bin.ts> \
-#   TINA_DSH_BIN=<dsh 的 lib/bin.js> \
-#   TINA_WORK_DIR=<工作目录> \
-#   bash demo.sh
-
+# P2 演示：只启动控制面，创建需求并持久排队。完整引擎闭环在 P3/P4 恢复。
+# TINA_CONTROL_DB=.tina/demo.db bash demo.sh 可保留数据；默认使用内存库。
 set -euo pipefail
-
 PORT="${TINA_PORT:-7801}"
 BASE="http://127.0.0.1:${PORT}"
 PROJECT="${TINA_PROJECT:-proj-website}"
-BIN="$(ls .build/control-plane* 2>/dev/null | head -1 || true)"
-
-if [[ -z "${BIN}" ]]; then
-  echo "Control plane binary not found. Run make build first." >&2
-  exit 1
-fi
-
-step() { printf '\n== %s ==\n' "$*"; }
-note() { printf '  %s\n' "$*"; }
-
-# 请求体写进临时文件，再用 --data-binary @file 发出去。
-# 直接把中文放在命令行参数里，Git Bash 会按系统代码页（GBK）转给 curl.exe，
-# 控制面收到的就不是合法 UTF-8 了。
-post() {
-  local path="$1" body="$2" tmp
-  tmp="$(mktemp)"
-  printf '%s' "$body" >"${tmp}"
-  curl -fsS -X POST "${BASE}${path}" -H 'content-type: application/json' --data-binary "@${tmp}"
-  rm -f "${tmp}"
-}
-
-json() { node -e '
-  let raw = "";
-  process.stdin.on("data", (chunk) => (raw += chunk));
-  process.stdin.on("end", () => {
-    let value = JSON.parse(raw);
-    for (const key of process.argv[1].split(".")) value = value?.[key];
-    if (value === undefined) process.exit(1);
-    process.stdout.write(typeof value === "string" ? value : JSON.stringify(value));
-  });
-' "$1"; }
-
-board() {
-  curl -fsS "${BASE}/api/board?project=${PROJECT}" | node -e '
-    let raw = "";
-    process.stdin.on("data", (chunk) => (raw += chunk));
-    process.stdin.on("end", () => {
-      const board = JSON.parse(raw);
-      for (const card of board.cards) {
-        const kind = card.kind === "demand" ? "Request" : "Task";
-        console.log(`   - [${card.status}] ${card.title} (${kind})`);
-      }
-      for (const approval of board.approvals) {
-        console.log(`   ! Pending ${approval.kind}: ${approval.payload?.summary ?? ""}`);
-      }
-    });
-  '
-}
-
-card_status() {
-  curl -fsS "${BASE}/api/board?project=${PROJECT}" | node -e '
-    let raw = "";
-    process.stdin.on("data", (chunk) => (raw += chunk));
-    process.stdin.on("end", () => {
-      const board = JSON.parse(raw);
-      const card = board.cards.find((item) => item.id === process.argv[1]);
-      process.stdout.write(card === undefined ? "missing" : card.status);
-    });
-  ' "$1"
-}
-
-wait_status() {
-  local id="$1" want="$2"
-  for _ in $(seq 1 600); do
-    [[ "$(card_status "${id}")" == "${want}" ]] && return 0
-    sleep 0.5
-  done
-  return 1
-}
-
+DEMO_DB="${TINA_CONTROL_DB:-:memory:}"
+BIN=".build/control-plane"
+[[ -f "${BIN}.exe" ]] && BIN="${BIN}.exe"
+[[ -f "${BIN}" ]] || { echo 'Run make build first.' >&2; exit 1; }
 CP_PID=""
-NODE_PID=""
 cleanup() {
-  [[ -n "${NODE_PID}" ]] && kill "${NODE_PID}" 2>/dev/null || true
-  [[ -n "${CP_PID}" ]] && kill "${CP_PID}" 2>/dev/null || true
-  wait 2>/dev/null || true
+  if [[ -n "${CP_PID}" ]]; then
+    kill "${CP_PID}" 2>/dev/null || true
+    wait "${CP_PID}" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
-
-step "Starting control plane and node"
-"${BIN}" -addr "127.0.0.1:${PORT}" >/tmp/tina-demo-cp.log 2>&1 &
+if curl -fsS "${BASE}/health" >/dev/null 2>&1; then
+  printf 'Port %s already serves a control plane; choose TINA_PORT.\n' "${PORT}" >&2
+  exit 1
+fi
+"${BIN}" -addr "127.0.0.1:${PORT}" -db "${DEMO_DB}" >.build/demo-control.log 2>&1 &
 CP_PID=$!
 for _ in $(seq 1 100); do
+  kill -0 "${CP_PID}" 2>/dev/null || { cat .build/demo-control.log >&2; exit 1; }
   curl -fsS "${BASE}/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
-curl -fsS "${BASE}/health" >/dev/null || { echo "Control plane failed to start" >&2; exit 1; }
-TINA_CONTROL_PLANE_URL="ws://127.0.0.1:${PORT}/ws/node" node packages/node-runtime/src/main.ts >/tmp/tina-demo-node.log 2>&1 &
-NODE_PID=$!
-for _ in $(seq 1 100); do
-  curl -fsS "${BASE}/api/state" | grep -q '"online":true' && break
-  sleep 0.1
-done
-note "Control plane at ${BASE}; node registered"
-
-step "1. Create request card"
-TASK_ID=$(post "/api/cards" "{\"projectId\":\"${PROJECT}\",\"title\":\"网站改版\",\"description\":\"首屏和接口一起改，下周上线\"}" | json id)
-note "Request card: ${TASK_ID}"
-
-step "2. Request a plan from Router"
-APPROVAL_ID=$(post "/api/plans" "{\"projectId\":\"${PROJECT}\",\"taskId\":\"${TASK_ID}\"}" | json id)
-note "Plan ${APPROVAL_ID} awaiting approval"
-board
-
-step "3. Approve plan and create task cards"
-PLAN_TASKS=$(post "/api/plans/${APPROVAL_ID}/decide" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\"}" | json tasks)
-mapfile -t IDS < <(echo "${PLAN_TASKS}" | node -e '
-  let raw = "";
-  process.stdin.on("data", (chunk) => (raw += chunk));
-  process.stdin.on("end", () => {
-    for (const task of JSON.parse(raw)) console.log(task.id);
-  });
-')
-note "Created ${#IDS[@]} task cards"
-board
-
-step "4. Dispatch tasks (one session per card)"
-for id in "${IDS[@]}"; do
-  post "/api/tasks/${id}/dispatch" "{\"projectId\":\"${PROJECT}\"}" >/dev/null
-  note "Dispatched ${id}"
-done
-for id in "${IDS[@]}"; do
-  wait_status "${id}" review || { echo "Card did not reach review: ${id}" >&2; board; exit 1; }
-done
-note "All runs finished; reports saved"
-board
-
-step "5. Approve final review for the first task"
-post "/api/tasks/${IDS[0]}/review" "{\"projectId\":\"${PROJECT}\",\"decision\":\"approved\",\"note\":\"验收通过\"}" >/dev/null
-board
-
-step "Done"
-note "Saved: 1 request card and ${#IDS[@]} task cards; first task approved, others awaiting review"
+curl -fsS "${BASE}/health" >/dev/null
+post() {
+  local endpoint="$1" content="$2" temporary
+  temporary="$(mktemp)"
+  printf '%s' "${content}" >"${temporary}"
+  curl -fsS -X POST "${BASE}${endpoint}" -H 'content-type: application/json' --data-binary "@${temporary}"
+  rm -f "${temporary}"
+}
+json_id() { node -e 'let text="";process.stdin.on("data",c=>text+=c);process.stdin.on("end",()=>process.stdout.write(JSON.parse(text).id));'; }
+TASK_ID=$(post /api/cards "{\"projectId\":\"${PROJECT}\",\"title\":\"网站改版\",\"description\":\"验证无执行节点时仍可管理项目\"}" | json_id)
+post /api/plans "{\"projectId\":\"${PROJECT}\",\"taskId\":\"${TASK_ID}\"}" >/dev/null
+curl -fsS "${BASE}/api/board?project=${PROJECT}"
+printf '\n'
+curl -fsS "${BASE}/api/queue?project=${PROJECT}"
+printf '\nSaved request %s. Run is queued; P3/P4 will connect execution.\n' "${TASK_ID}"

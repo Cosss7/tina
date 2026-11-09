@@ -2,143 +2,165 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
+
+	"github.com/Cosss7/tina/services/control-plane/internal/project"
 )
 
-// 这些路由是浏览器和 demo.sh 的唯一入口。控制面自己不存任务，全部转给托管项目的节点。
-
-func (h *Hub) board(w http.ResponseWriter, r *http.Request) {
-	projectID := r.URL.Query().Get("project")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "Missing query parameter: project")
-		return
-	}
-	h.forward(w, r, projectID, "board", map[string]any{"projectId": projectID})
+type API struct {
+	projects *project.Service
+	hub      *Hub
 }
 
-func (h *Hub) createCard(w http.ResponseWriter, r *http.Request) {
-	body, ok := decodeBody(w, r)
-	if !ok {
-		return
-	}
-	projectID := stringField(body, "projectId")
-	title := stringField(body, "title")
-	if projectID == "" || title == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId and title are required")
-		return
-	}
-	h.forward(w, r, projectID, "card.create", map[string]any{
-		"projectId":   projectID,
-		"title":       title,
-		"description": stringField(body, "description"),
+func newHandler(projects *project.Service, hub *Hub, static fs.FS) http.Handler {
+	a := &API{projects: projects, hub: hub}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"ok": true, "version": version})
 	})
-}
-
-func (h *Hub) requestPlan(w http.ResponseWriter, r *http.Request) {
-	body, ok := decodeBody(w, r)
-	if !ok {
-		return
-	}
-	projectID := stringField(body, "projectId")
-	taskID := stringField(body, "taskId")
-	if projectID == "" || taskID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId and taskId are required")
-		return
-	}
-	h.forward(w, r, projectID, "plan.request", map[string]any{"projectId": projectID, "taskId": taskID})
-}
-
-func (h *Hub) decidePlan(w http.ResponseWriter, r *http.Request) {
-	body, ok := decodeBody(w, r)
-	if !ok {
-		return
-	}
-	projectID := stringField(body, "projectId")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId is required")
-		return
-	}
-	h.forward(w, r, projectID, "plan.decide", map[string]any{
-		"approvalId": r.PathValue("id"),
-		"decision":   stringField(body, "decision"),
+	mux.HandleFunc("GET /api/state", a.state)
+	mux.HandleFunc("GET /ws/node", hub.ServeNodeWS)
+	mux.HandleFunc("POST /api/projects", a.createProject)
+	mux.HandleFunc("GET /api/projects/{id}/agents", func(w http.ResponseWriter, r *http.Request) {
+		v, err := projects.Agents(r.Context(), r.PathValue("id"))
+		a.reply(w, v, err, 200)
 	})
-}
-
-func (h *Hub) dispatchTask(w http.ResponseWriter, r *http.Request) {
-	body, ok := decodeBody(w, r)
-	if !ok {
-		return
-	}
-	projectID := stringField(body, "projectId")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId is required")
-		return
-	}
-	h.forward(w, r, projectID, "task.dispatch", map[string]any{"taskId": r.PathValue("id")})
-}
-
-func (h *Hub) reviewTask(w http.ResponseWriter, r *http.Request) {
-	body, ok := decodeBody(w, r)
-	if !ok {
-		return
-	}
-	projectID := stringField(body, "projectId")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "projectId is required")
-		return
-	}
-	h.forward(w, r, projectID, "task.review", map[string]any{
-		"taskId":   r.PathValue("id"),
-		"decision": stringField(body, "decision"),
-		"note":     stringField(body, "note"),
+	mux.HandleFunc("PUT /api/projects/{id}/agents/{agent}", a.configureAgent)
+	mux.HandleFunc("GET /api/board", func(w http.ResponseWriter, r *http.Request) {
+		v, err := projects.Board(r.Context(), r.URL.Query().Get("project"))
+		a.reply(w, v, err, 200)
 	})
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
+		v, err := projects.Events(r.Context(), r.URL.Query().Get("project"))
+		a.reply(w, v, err, 200)
+	})
+	mux.HandleFunc("GET /api/queue", func(w http.ResponseWriter, r *http.Request) {
+		v, err := projects.Queue(r.Context(), r.URL.Query().Get("project"))
+		a.reply(w, v, err, 200)
+	})
+	mux.HandleFunc("POST /api/cards", a.createCard)
+	mux.HandleFunc("POST /api/plans", a.requestPlan)
+	mux.HandleFunc("POST /api/plans/{id}/decide", a.decidePlan)
+	mux.HandleFunc("POST /api/tasks/{id}/dispatch", a.dispatchTask)
+	mux.HandleFunc("POST /api/tasks/{id}/review", a.reviewTask)
+	mux.Handle("GET /", http.FileServerFS(static))
+	return mux
 }
-
-// forward 把一次请求转给节点，把结果原样写回去。
-func (h *Hub) forward(w http.ResponseWriter, r *http.Request, projectID, method string, params map[string]any) {
-	result, err := h.callNode(r.Context(), projectID, method, params)
+func (a *API) state(w http.ResponseWriter, r *http.Request) {
+	projects, err := a.projects.Projects(r.Context())
 	if err != nil {
-		status, code := rpcStatus(err)
-		log.Printf("%s failed: %v", method, err)
-		writeError(w, status, code, err.Error())
+		a.reply(w, nil, err, 200)
+		return
+	}
+	writeJSON(w, struct {
+		Snapshot
+		Projects []project.Project `json:"projects"`
+	}{a.hub.Snapshot(), projects})
+}
+func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.CreateProject(r.Context(), "", stringField(body, "name"), "human:local")
+	a.reply(w, v, err, 201)
+}
+func (a *API) configureAgent(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.ConfigureAgent(r.Context(), r.PathValue("id"), r.PathValue("agent"), stringField(body, "name"), stringField(body, "engineId"), stringField(body, "nodeId"), stringField(body, "cwd"), "human:local")
+	a.reply(w, v, err, 200)
+}
+func (a *API) createCard(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.CreateDemand(r.Context(), stringField(body, "projectId"), stringField(body, "title"), stringField(body, "description"), "human:local")
+	a.reply(w, v, err, 201)
+}
+func (a *API) requestPlan(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.RequestPlan(r.Context(), stringField(body, "projectId"), stringField(body, "taskId"), "human:local")
+	a.reply(w, v, err, 202)
+}
+func (a *API) decidePlan(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.DecidePlan(r.Context(), stringField(body, "projectId"), r.PathValue("id"), stringField(body, "decision"), "human:local")
+	a.reply(w, v, err, 200)
+}
+func (a *API) dispatchTask(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.Dispatch(r.Context(), stringField(body, "projectId"), r.PathValue("id"), "human:local")
+	a.reply(w, v, err, 202)
+}
+func (a *API) reviewTask(w http.ResponseWriter, r *http.Request) {
+	body, ok := decodeBody(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.projects.Review(r.Context(), stringField(body, "projectId"), r.PathValue("id"), stringField(body, "decision"), stringField(body, "note"), "human:local")
+	a.reply(w, v, err, 200)
+}
+func (a *API) reply(w http.ResponseWriter, value any, err error, status int) {
+	if err != nil {
+		var business *project.Error
+		if errors.As(err, &business) {
+			status := http.StatusBadRequest
+			switch business.Code {
+			case "not_found":
+				status = 404
+			case "conflict":
+				status = 409
+			}
+			writeError(w, status, business.Code, business.Message)
+		} else {
+			log.Printf("Project API failed: %v", err)
+			writeError(w, 500, "internal", "Project operation failed")
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if _, err := w.Write(result); err != nil {
-		log.Printf("Failed to write response: %v", err)
-	}
+	w.WriteHeader(status)
+	writeJSON(w, value)
 }
-
 func decodeBody(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "Failed to read request body")
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	var body map[string]any
+	if err := decoder.Decode(&body); err != nil || body == nil {
+		writeError(w, 400, "invalid_argument", "Request body must be a JSON object of at most 1 MiB")
 		return nil, false
 	}
-	if len(raw) == 0 {
-		return map[string]any{}, true
-	}
-	var body map[string]any
-	if err := json.Unmarshal(raw, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "Request body must be a JSON object")
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		writeError(w, 400, "invalid_argument", "Expected one JSON object")
 		return nil, false
 	}
 	return body, true
 }
-
 func stringField(body map[string]any, key string) string {
-	value, ok := body[key].(string)
-	if !ok {
-		return ""
-	}
+	value, _ := body[key].(string)
 	return value
 }
-
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
