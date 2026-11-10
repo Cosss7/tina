@@ -11,7 +11,6 @@
     "format:check": "node scripts/format.mjs --check",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test",
-    "verify": "pnpm run format:check && pnpm run typecheck && pnpm run test",
     "tina": "node apps/cli/src/main.ts"
   },
   "devDependencies": {

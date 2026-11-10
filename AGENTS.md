@@ -31,11 +31,11 @@ packages/ui-kit          组件库（预留）
 make up         # 构建并启动持久化控制面 + 本机 Go tinad（默认 fake）
 make demo       # 完整的离线演示，数据隔离在 .build
 make format     # Go 用 gofmt，前端、脚本与配置用 Prettier
-make verify     # 格式检查、构建、类型检查和离线测试，进 CI
+make verify     # 格式检查、构建、类型检查和离线测试
 ```
 
 ## 提交前检查
 
 修改代码后、提交前必须执行 `make format`，并确保 `make format-check` 通过；格式化产生的改动必须一并提交。统一使用仓库锁定的 Prettier 与 Go 自带的 gofmt，具体规则见 `.prettierrc.json` 和 `.prettierignore`。
 
-`make verify` 和 CI 必须通过格式检查；格式不符合要求时不得提交或合并。
+`make verify` 包含格式检查；格式不符合要求时不得提交或合并。GitHub CI 暂停自动触发，仅保留手动运行。
