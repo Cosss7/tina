@@ -1,47 +1,96 @@
 [
   {
-    "version": 1, "id": "register-1", "type": "register",
+    "version": 1,
+    "id": "register-1",
+    "type": "register",
     "payload": {
-      "nodeId": "node-1", "name": "laptop", "version": "dev", "maxConcurrent": 2,
-      "engines": [{"id": "fake", "capabilities": {"resume": true, "interrupt": "turn", "respond": false}}],
+      "nodeId": "node-1",
+      "name": "laptop",
+      "version": "dev",
+      "maxConcurrent": 2,
+      "engines": [{ "id": "fake", "capabilities": { "resume": true, "interrupt": "turn", "respond": false } }],
       "agents": [
-        {"id": "router-1", "projectId": "project-1", "role": "router", "engineId": "fake"},
-        {"id": "worker-1", "projectId": "project-1", "role": "worker", "engineId": "fake"}
+        { "id": "router-1", "projectId": "project-1", "role": "router", "engineId": "fake" },
+        { "id": "worker-1", "projectId": "project-1", "role": "worker", "engineId": "fake" }
       ]
     }
   },
   {
-    "version": 1, "id": "dispatch-router-1", "type": "dispatch",
+    "version": 1,
+    "id": "dispatch-router-1",
+    "type": "dispatch",
     "payload": {
       "commandId": "command-router-1",
-      "execution": {"projectId": "project-1", "runId": "run-router-1", "agentId": "router-1", "nodeId": "node-1", "sessionId": "session-router-1", "activityId": "activity-router-1"},
-      "config": {"engineId": "fake", "cwd": "/work/tina"},
+      "execution": {
+        "projectId": "project-1",
+        "runId": "run-router-1",
+        "agentId": "router-1",
+        "nodeId": "node-1",
+        "sessionId": "session-router-1",
+        "activityId": "activity-router-1"
+      },
+      "config": { "engineId": "fake", "cwd": "/work/tina" },
       "input": "将父任务拆成计划，返回 JSON 建议。"
     }
   },
   {
-    "version": 1, "id": "result-router-1", "type": "result",
+    "version": 1,
+    "id": "result-router-1",
+    "type": "result",
     "payload": {
-      "commandId": "command-router-1", "instanceId": "instance-router-1", "seq": 2, "occurredAt": "2026-11-09T00:00:00Z",
-      "execution": {"projectId": "project-1", "runId": "run-router-1", "agentId": "router-1", "nodeId": "node-1", "sessionId": "session-router-1", "activityId": "activity-router-1"},
-      "state": "completed", "output": "{\"summary\":\"先实现功能\",\"cards\":[{\"key\":\"c1\",\"title\":\"实现功能\",\"description\":\"实现约定行为\",\"acceptance\":[\"功能验证通过\"],\"deps\":[]}]}"
+      "commandId": "command-router-1",
+      "instanceId": "instance-router-1",
+      "seq": 2,
+      "occurredAt": "2026-11-09T00:00:00Z",
+      "execution": {
+        "projectId": "project-1",
+        "runId": "run-router-1",
+        "agentId": "router-1",
+        "nodeId": "node-1",
+        "sessionId": "session-router-1",
+        "activityId": "activity-router-1"
+      },
+      "state": "completed",
+      "output": "{\"summary\":\"先实现功能\",\"cards\":[{\"key\":\"c1\",\"title\":\"实现功能\",\"description\":\"实现约定行为\",\"acceptance\":[\"功能验证通过\"],\"deps\":[]}]}"
     }
   },
   {
-    "version": 1, "id": "dispatch-worker-1", "type": "dispatch",
+    "version": 1,
+    "id": "dispatch-worker-1",
+    "type": "dispatch",
     "payload": {
       "commandId": "command-worker-1",
-      "execution": {"projectId": "project-1", "runId": "run-worker-1", "agentId": "worker-1", "nodeId": "node-1", "sessionId": "session-worker-1", "activityId": "activity-worker-1"},
-      "config": {"engineId": "fake", "cwd": "/work/tina"},
+      "execution": {
+        "projectId": "project-1",
+        "runId": "run-worker-1",
+        "agentId": "worker-1",
+        "nodeId": "node-1",
+        "sessionId": "session-worker-1",
+        "activityId": "activity-worker-1"
+      },
+      "config": { "engineId": "fake", "cwd": "/work/tina" },
       "input": "执行已批准的子任务，返回结构化报告。"
     }
   },
   {
-    "version": 1, "id": "result-worker-1", "type": "result",
+    "version": 1,
+    "id": "result-worker-1",
+    "type": "result",
     "payload": {
-      "commandId": "command-worker-1", "instanceId": "instance-worker-1", "seq": 2, "occurredAt": "2026-11-09T00:01:00Z",
-      "execution": {"projectId": "project-1", "runId": "run-worker-1", "agentId": "worker-1", "nodeId": "node-1", "sessionId": "session-worker-1", "activityId": "activity-worker-1"},
-      "state": "completed", "output": "{\"state\":\"done\",\"summary\":\"实现完成，等待人工终审\",\"decisions\":[],\"artifacts\":[],\"blockers\":[],\"usage\":{}}"
+      "commandId": "command-worker-1",
+      "instanceId": "instance-worker-1",
+      "seq": 2,
+      "occurredAt": "2026-11-09T00:01:00Z",
+      "execution": {
+        "projectId": "project-1",
+        "runId": "run-worker-1",
+        "agentId": "worker-1",
+        "nodeId": "node-1",
+        "sessionId": "session-worker-1",
+        "activityId": "activity-worker-1"
+      },
+      "state": "completed",
+      "output": "{\"state\":\"done\",\"summary\":\"实现完成，等待人工终审\",\"decisions\":[],\"artifacts\":[],\"blockers\":[],\"usage\":{}}"
     }
   }
 ]

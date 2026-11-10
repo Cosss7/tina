@@ -37,7 +37,9 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
 
   const port = await freePort();
   const control = spawn(BIN, ['-addr', `127.0.0.1:${port}`, '-db', ':memory:'], { stdio: ['ignore', 'pipe', 'pipe'] });
-  control.on('error', (error) => { throw error; });
+  control.on('error', (error) => {
+    throw error;
+  });
   const controlLog: string[] = [];
   control.stdout.on('data', (chunk: Buffer) => controlLog.push(chunk.toString('utf8')));
   control.stderr.on('data', (chunk: Buffer) => controlLog.push(chunk.toString('utf8')));
@@ -53,18 +55,40 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
   const directory = mkdtempSync(path.join(ROOT, '.build', 'offline-go-'));
   const filename = path.join(directory, 'tinad.json');
   const token = 'offline-test-private-token-with-32-characters';
-  writeFileSync(filename, JSON.stringify({ nodeId: 'e2e-node', name: '端到端节点', token, url: `ws://127.0.0.1:${port}/ws/tinad`, database: path.join(directory, 'journal.db'), maxConcurrent: 2, roots: [directory], agents: [] }));
-  const enrollment = await fetch(`http://127.0.0.1:${port}/api/nodes/enroll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nodeId: 'e2e-node', name: '端到端节点', token }) });
+  writeFileSync(
+    filename,
+    JSON.stringify({
+      nodeId: 'e2e-node',
+      name: '端到端节点',
+      token,
+      url: `ws://127.0.0.1:${port}/ws/tinad`,
+      database: path.join(directory, 'journal.db'),
+      maxConcurrent: 2,
+      roots: [directory],
+      agents: [],
+    }),
+  );
+  const enrollment = await fetch(`http://127.0.0.1:${port}/api/nodes/enroll`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ nodeId: 'e2e-node', name: '端到端节点', token }),
+  });
   assert.equal(enrollment.status, 200, await enrollment.clone().text());
   const node = spawn(TINAD, ['-config', filename], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  node.on('error', (error) => { throw error; });
+  node.on('error', (error) => {
+    throw error;
+  });
   const nodeLog: string[] = [];
   node.stdout.on('data', (chunk: Buffer) => nodeLog.push(chunk.toString('utf8')));
   node.stderr.on('data', (chunk: Buffer) => nodeLog.push(chunk.toString('utf8')));
   t.after(async () => {
-    if (node.exitCode === null && node.signalCode === null) { const done = once(node, 'exit'); node.kill(); await done; }
+    if (node.exitCode === null && node.signalCode === null) {
+      const done = once(node, 'exit');
+      node.kill();
+      await done;
+    }
     assert.ok(directory.startsWith(path.join(ROOT, '.build') + path.sep));
     rmSync(directory, { recursive: true, force: true });
   });
@@ -101,7 +125,8 @@ test('节点掉线后控制面三秒内标记离线', async (t) => {
   assert.ok(elapsed <= 3_000, `掉线检测用了 ${elapsed}ms，超过 3 秒`);
   assert.deepEqual(offline.projects, initial?.projects, '节点离线不改变项目');
   const created = await fetch(`http://127.0.0.1:${port}/api/cards`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ projectId: 'proj-website', title: '离线仍可建卡' }),
   });
   assert.equal(created.status, 201);

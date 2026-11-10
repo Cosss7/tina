@@ -27,7 +27,9 @@ export function deriveStatus(store: Store, task: Task): TaskStatus {
 
   // 终端状态的 Run 只要有报告就进评审中——包括 failed 的兜底报告。
   // 不然一次失败会被推导成"待办"，人就再也看不见它了。
-  const terminal = runs.filter((run) => run.state === 'completed' || run.state === 'failed' || run.state === 'cancelled');
+  const terminal = runs.filter(
+    (run) => run.state === 'completed' || run.state === 'failed' || run.state === 'cancelled',
+  );
   const hasReport = terminal.some((run) => store.getReportByRun(run.id) !== undefined);
   if (hasReport) return 'review';
 
@@ -64,9 +66,13 @@ export function parsePlan(text: string): Plan {
     if (typeof item !== 'object' || item === null) throw new Error(`cards[${index}] must be an object`);
     const card = item as Record<string, unknown>;
     if (typeof card.title !== 'string' || card.title === '') throw new Error(`cards[${index}].title is required`);
-    const acceptance = Array.isArray(card.acceptance) ? card.acceptance.filter((entry): entry is string => typeof entry === 'string') : [];
+    const acceptance = Array.isArray(card.acceptance)
+      ? card.acceptance.filter((entry): entry is string => typeof entry === 'string')
+      : [];
     if (acceptance.length === 0) throw new Error(`cards[${index}] must include acceptance criteria`);
-    const deps = Array.isArray(card.deps) ? card.deps.filter((entry): entry is string => typeof entry === 'string') : [];
+    const deps = Array.isArray(card.deps)
+      ? card.deps.filter((entry): entry is string => typeof entry === 'string')
+      : [];
     return {
       key: typeof card.key === 'string' && card.key !== '' ? card.key : `c${index + 1}`,
       title: card.title,
@@ -101,8 +107,12 @@ export function parseReport(text: string): WorkerReport {
   }
   const summary = typeof raw.summary === 'string' ? raw.summary : '';
   if (summary === '') throw new Error('Report summary is required');
-  const decisions = Array.isArray(raw.decisions) ? raw.decisions.filter((entry): entry is string => typeof entry === 'string') : [];
-  const blockers = Array.isArray(raw.blockers) ? raw.blockers.filter((entry): entry is string => typeof entry === 'string') : [];
+  const decisions = Array.isArray(raw.decisions)
+    ? raw.decisions.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const blockers = Array.isArray(raw.blockers)
+    ? raw.blockers.filter((entry): entry is string => typeof entry === 'string')
+    : [];
   const artifacts: Array<{ path: string; note?: string }> = [];
   if (Array.isArray(raw.artifacts)) {
     for (const entry of raw.artifacts) {

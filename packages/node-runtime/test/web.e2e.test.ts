@@ -19,8 +19,12 @@ const BIN = path.join(ROOT, '.build', process.platform === 'win32' ? 'control-pl
 test('控制面服务的是构建出来的前端，静态资源可取', async (t) => {
   if (!existsSync(BIN)) throw new Error(`${BIN} 不存在，先跑 make build`);
   const port = await freePort();
-  const control = spawn(BIN, ['-addr', `127.0.0.1:${port}`, '-db', ':memory:'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  control.on('error', (error) => { throw error; });
+  const control = spawn(BIN, ['-addr', `127.0.0.1:${port}`, '-db', ':memory:'], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  control.on('error', (error) => {
+    throw error;
+  });
   t.after(() => control.kill());
 
   const index = await waitForHtml(port);

@@ -54,7 +54,10 @@ test('令牌不对：引擎被拒，host 就绪失败', async () => {
     serveEngine({ port: host.port, token: 'wrong', engine: 'stub', createBackend: stubBackend }),
     (error: unknown) => error instanceof PortError && error.code === ErrorCode.Unauthorized,
   );
-  await assert.rejects(host.whenReady(), (error: unknown) => error instanceof PortError && error.code === ErrorCode.Unauthorized);
+  await assert.rejects(
+    host.whenReady(),
+    (error: unknown) => error instanceof PortError && error.code === ErrorCode.Unauthorized,
+  );
   await host.close();
 });
 
@@ -74,8 +77,14 @@ test('事件按发出顺序到达，seq 单调递增', async () => {
   const { sessionId } = await host.call('createSession', { profile: 'p', cwd: '.', model: 'm' });
   await host.call('send', { sessionId, input: 'hello' });
   await waitFor(() => events.length >= 4);
-  assert.deepEqual(events.map((event) => event.type), ['turn.start', 'message.start', 'message.end', 'turn.end']);
-  assert.deepEqual(events.map((event) => event.seq), [0, 1, 2, 3]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['turn.start', 'message.start', 'message.end', 'turn.end'],
+  );
+  assert.deepEqual(
+    events.map((event) => event.seq),
+    [0, 1, 2, 3],
+  );
   assert.deepEqual(events[2]?.payload, { text: 'echo: hello' });
   await host.close();
   served.close();
@@ -83,7 +92,10 @@ test('事件按发出顺序到达，seq 单调递增', async () => {
 
 test('未到握手就发方法是 NotReady', async () => {
   const host = await EngineHost.create({ token: 'test-token' });
-  await assert.rejects(host.call('capabilities', undefined), (error: unknown) => error instanceof PortError && error.code === ErrorCode.NotReady);
+  await assert.rejects(
+    host.call('capabilities', undefined),
+    (error: unknown) => error instanceof PortError && error.code === ErrorCode.NotReady,
+  );
   await host.close();
 });
 
@@ -113,7 +125,10 @@ test('引擎断开：待完成的调用失败，断开回调触发', async () =>
   const pending = host.call('send', { sessionId: 's', input: 'hang' });
   await waitFor(() => true);
   served.close();
-  await assert.rejects(pending, (error: unknown) => error instanceof PortError && error.code === ErrorCode.Disconnected);
+  await assert.rejects(
+    pending,
+    (error: unknown) => error instanceof PortError && error.code === ErrorCode.Disconnected,
+  );
   assert.equal(disconnected, 1);
   await host.close();
 });

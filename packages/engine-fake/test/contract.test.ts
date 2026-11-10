@@ -39,8 +39,12 @@ test('capabilities 来自场景，fork 是 false', async () => {
 
 test('createSession 的 id 从 1 开始、每次自增', async () => {
   const { host, close } = await startFake();
-  assert.deepEqual(await host.call('createSession', { profile: 'fake', cwd: '.', model: 'm' }), { sessionId: 'fake-session-1' });
-  assert.deepEqual(await host.call('createSession', { profile: 'fake', cwd: '.', model: 'm' }), { sessionId: 'fake-session-2' });
+  assert.deepEqual(await host.call('createSession', { profile: 'fake', cwd: '.', model: 'm' }), {
+    sessionId: 'fake-session-1',
+  });
+  assert.deepEqual(await host.call('createSession', { profile: 'fake', cwd: '.', model: 'm' }), {
+    sessionId: 'fake-session-2',
+  });
   await close();
 });
 
@@ -51,14 +55,10 @@ test('按输入匹配规则，回放整段事件', async () => {
   const receipt = await host.call('send', { sessionId, input: '帮我拆卡' });
   assert.deepEqual(receipt, { receipt: 'fake-session-1/receipt-1' });
   await waitFor(() => events.length >= 6);
-  assert.deepEqual(events.map((event) => event.type), [
-    'turn.start',
-    'message.start',
-    'tool.call',
-    'tool.result',
-    'message.end',
-    'turn.end',
-  ]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['turn.start', 'message.start', 'tool.call', 'tool.result', 'message.end', 'turn.end'],
+  );
   assert.deepEqual(events[3]?.payload, { callId: 'call-1', isError: false, text: '已拆成 2 张' });
   await close();
 });

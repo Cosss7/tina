@@ -23,15 +23,17 @@ const REPORT = JSON.stringify({
 function setup(turn?: TurnRunner) {
   const store = new Store();
   let prompts: string[] = [];
-  const runner: TurnRunner = turn ?? (async (prompt) => {
-    prompts.push(prompt);
-    return {
-      events: [],
-      text: prompt.includes('TINA:PLAN') ? PLAN : REPORT,
-      usage: {},
-      engine: 'stub',
-    };
-  });
+  const runner: TurnRunner =
+    turn ??
+    (async (prompt) => {
+      prompts.push(prompt);
+      return {
+        events: [],
+        text: prompt.includes('TINA:PLAN') ? PLAN : REPORT,
+        usage: {},
+        engine: 'stub',
+      };
+    });
   const service = new Service({ store, nodeId: 'node-test', runTurn: runner });
   return { store, service, prompts: () => prompts };
 }
@@ -84,7 +86,14 @@ test('报告被解析后落库，字段一个不少', async () => {
 });
 
 test('blocked 的报告也进评审中，不自动失败', async () => {
-  const blocked = JSON.stringify({ state: 'blocked', summary: '缺凭据', decisions: [], artifacts: [], blockers: ['要 key'], usage: {} });
+  const blocked = JSON.stringify({
+    state: 'blocked',
+    summary: '缺凭据',
+    decisions: [],
+    artifacts: [],
+    blockers: ['要 key'],
+    usage: {},
+  });
   const { store, service } = setup(async (prompt) => ({
     events: [],
     text: prompt.includes('TINA:PLAN') ? PLAN : blocked,
@@ -125,15 +134,19 @@ test('报告解析不了时 Run 失败，并补一份 generated 的兜底报告'
 test('计划没批不能派活；需求卡不能直接派活', async () => {
   const { store, service } = setup();
   const demand = service.createDemand({ projectId: 'p', title: '需求', actor: 'human' });
-  assert.throws(() => service.dispatch({ taskId: demand.id, actor: 'human' }), (error: unknown) =>
-    error instanceof ServiceError && /Split the request into tasks/.test(error.message));
+  assert.throws(
+    () => service.dispatch({ taskId: demand.id, actor: 'human' }),
+    (error: unknown) => error instanceof ServiceError && /Split the request into tasks/.test(error.message),
+  );
 
   const approval = await service.requestPlan({ projectId: 'p', taskId: demand.id, actor: 'human' });
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
   const task = store.getTask(tasks[0]!.id)!;
   store.updateTask(task, { planApproved: false });
-  assert.throws(() => service.dispatch({ taskId: task.id, actor: 'human' }), (error: unknown) =>
-    error instanceof ServiceError && /Plan is not approved/.test(error.message));
+  assert.throws(
+    () => service.dispatch({ taskId: task.id, actor: 'human' }),
+    (error: unknown) => error instanceof ServiceError && /Plan is not approved/.test(error.message),
+  );
 });
 
 test('拒绝计划不产生任务卡', async () => {
@@ -155,15 +168,29 @@ test('每一步都留事件，且 seq 连续', async () => {
   await service.waitForRun(last.run.id);
 
   const events = store.listEvents('p');
-  assert.deepEqual(events.map((event) => event.seq), events.map((_, index) => index + 1));
+  assert.deepEqual(
+    events.map((event) => event.seq),
+    events.map((_, index) => index + 1),
+  );
   assert.deepEqual(
     events.map((event) => event.type),
-    ['card.created', 'plan.requested', 'plan.approved', 'card.created', 'card.created', 'run.queued', 'run.started', 'run.completed'],
+    [
+      'card.created',
+      'plan.requested',
+      'plan.approved',
+      'card.created',
+      'card.created',
+      'run.queued',
+      'run.started',
+      'run.completed',
+    ],
   );
 });
 
 test('Router 计划与 Worker 报告的解析能容忍围栏和前后废话', () => {
-  const plan = parsePlan('先说说思路。\n```json\n{"summary":"x","cards":[{"title":"t","acceptance":["a"]}]}\n```\n以上。');
+  const plan = parsePlan(
+    '先说说思路。\n```json\n{"summary":"x","cards":[{"title":"t","acceptance":["a"]}]}\n```\n以上。',
+  );
   assert.equal(plan.cards[0]!.title, 't');
   assert.equal(plan.cards[0]!.key, 'c1');
 

@@ -7,13 +7,16 @@
     "node": ">=22"
   },
   "scripts": {
+    "format": "node scripts/format.mjs --write",
+    "format:check": "node scripts/format.mjs --check",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test",
-    "verify": "pnpm run typecheck && pnpm run test",
+    "verify": "pnpm run format:check && pnpm run typecheck && pnpm run test",
     "tina": "node apps/cli/src/main.ts"
   },
   "devDependencies": {
-    "typescript": "~5.9.3",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "prettier": "3.9.10",
+    "typescript": "~5.9.3"
   }
 }

@@ -17,7 +17,7 @@ rules:
       - type: tool.call
         payload: { callId: call-1, name: plan.split, arguments: '{"cards":2}' }
       - type: tool.result
-        payload: { callId: call-1, isError: false, text: "已拆成 2 张" }
+        payload: { callId: call-1, isError: false, text: '已拆成 2 张' }
       - type: message.end
         payload: { text: '拆好了，两张卡，等你批计划。' }
       - type: turn.end

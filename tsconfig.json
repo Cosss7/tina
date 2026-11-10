@@ -1,16 +1,10 @@
 {
   "compilerOptions": {
     "target": "es2023",
-    "lib": [
-      "es2023",
-      "dom",
-      "dom.iterable"
-    ],
+    "lib": ["es2023", "dom", "dom.iterable"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": [
-      "node"
-    ],
+    "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -22,10 +16,5 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx"
   },
-  "include": [
-    "packages/*/src/**/*.ts",
-    "packages/*/test/**/*.ts",
-    "apps/*/src/**/*.ts",
-    "apps/*/src/**/*.tsx"
-  ]
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "apps/*/src/**/*.tsx"]
 }

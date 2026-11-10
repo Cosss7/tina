@@ -19,16 +19,30 @@ test('真 fake engine 跑完整闭环，计划与报告都能解析', async () =
     store,
     nodeId: 'node-e2e',
     runTurn: (prompt) =>
-      runTurn({ engineBin: config.engineBin, scenario: config.scenario, cwd: config.workDir, prompt, timeoutMs: 20_000 }),
+      runTurn({
+        engineBin: config.engineBin,
+        scenario: config.scenario,
+        cwd: config.workDir,
+        prompt,
+        timeoutMs: 20_000,
+      }),
   });
 
   const project = 'proj-website';
-  const demand = service.createDemand({ projectId: project, title: '网站改版', description: '把首页和接口一起改', actor: 'human' });
+  const demand = service.createDemand({
+    projectId: project,
+    title: '网站改版',
+    description: '把首页和接口一起改',
+    actor: 'human',
+  });
 
   const approval = await service.requestPlan({ projectId: project, taskId: demand.id, actor: 'human' });
   const payload = approval.payload as { summary?: string; cards?: Array<{ title: string; acceptance: string[] }> };
   assert.match(payload.summary ?? '', /首页和接口/);
-  assert.deepEqual(payload.cards?.map((card) => card.title), ['首页改版', '接口联调']);
+  assert.deepEqual(
+    payload.cards?.map((card) => card.title),
+    ['首页改版', '接口联调'],
+  );
 
   const { tasks } = service.decidePlan({ approvalId: approval.id, decision: 'approved', actor: 'human' });
   assert.equal(tasks.length, 2);

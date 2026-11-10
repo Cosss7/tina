@@ -19,9 +19,15 @@ EXE := $(shell go env GOEXE)
 BIN := .build/control-plane$(EXE)
 TINAD_BIN := .build/tinad$(EXE)
 
-.PHONY: verify web build typecheck test up demo clean
+.PHONY: verify format format-check web build typecheck test up demo clean
 
-verify: web build typecheck test
+verify: format-check web build typecheck test
+
+format:
+	node scripts/format.mjs --write
+
+format-check:
+	node scripts/format.mjs --check
 
 web:
 	node apps/web/build.mjs

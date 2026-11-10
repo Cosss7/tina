@@ -134,9 +134,7 @@ export class EngineHost {
       this.#pending.set(id, { resolve, reject, timer });
     });
     const request: JsonRpcMessage =
-      params === undefined
-        ? { jsonrpc: '2.0', id, method }
-        : { jsonrpc: '2.0', id, method, params };
+      params === undefined ? { jsonrpc: '2.0', id, method } : { jsonrpc: '2.0', id, method, params };
     this.#socket.write(encodeMessage(request));
     return (await result) as MethodMap[M]['result'];
   }

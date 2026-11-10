@@ -63,7 +63,10 @@ export function parseScenario(raw: unknown, source = '<inline>'): Scenario {
     capabilities: parseCapabilities(input.capabilities, `${source}: capabilities`),
     baseTime: typeof input.baseTime === 'string' ? input.baseTime : DEFAULT_BASE_TIME,
     rules: parsedRules,
-    fallback: input.fallback === undefined ? [{ type: 'error', payload: { code: 'no_rule', message: 'no scenario rule matched' } }] : parseEvents(input.fallback, `${source}: fallback`),
+    fallback:
+      input.fallback === undefined
+        ? [{ type: 'error', payload: { code: 'no_rule', message: 'no scenario rule matched' } }]
+        : parseEvents(input.fallback, `${source}: fallback`),
   };
   if (Number.isNaN(Date.parse(scenario.baseTime))) throw new Error(`${source}: baseTime is not a valid ISO time`);
   if (typeof input.engineVersion === 'string') scenario.engineVersion = input.engineVersion;
@@ -104,11 +107,13 @@ function parseEvents(raw: unknown, source: string): EventSpec[] {
     }
     const spec: EventSpec = { type: input.type as EngineEventType };
     if (input.payload !== undefined) {
-      if (typeof input.payload !== 'object' || input.payload === null) throw new Error(`${at}.payload must be a mapping`);
+      if (typeof input.payload !== 'object' || input.payload === null)
+        throw new Error(`${at}.payload must be a mapping`);
       spec.payload = input.payload as Record<string, unknown>;
     }
     if (input.delayMs !== undefined) {
-      if (typeof input.delayMs !== 'number' || input.delayMs < 0) throw new Error(`${at}.delayMs must be a non-negative number`);
+      if (typeof input.delayMs !== 'number' || input.delayMs < 0)
+        throw new Error(`${at}.delayMs must be a non-negative number`);
       spec.delayMs = input.delayMs;
     }
     return spec;

@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "tina": "./src/main.ts" },
-  "exports": { ".": "./src/main.ts" }
+  "bin": {
+    "tina": "./src/main.ts"
+  },
+  "exports": {
+    ".": "./src/main.ts"
+  }
 }

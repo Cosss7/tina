@@ -198,9 +198,19 @@ export class Store {
          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        task.id, task.projectId, task.title, task.description, task.status, task.kind,
-        task.assigneeKind, task.assigneeId, JSON.stringify(task.deps),
-        task.manualOverride ? 1 : 0, task.planApproved ? 1 : 0, task.createdAt, task.updatedAt,
+        task.id,
+        task.projectId,
+        task.title,
+        task.description,
+        task.status,
+        task.kind,
+        task.assigneeKind,
+        task.assigneeId,
+        JSON.stringify(task.deps),
+        task.manualOverride ? 1 : 0,
+        task.planApproved ? 1 : 0,
+        task.createdAt,
+        task.updatedAt,
       );
     return task;
   }
@@ -215,13 +225,23 @@ export class Store {
     return rows.map((row) => mapTask(row as unknown as RawTask));
   }
 
-  updateTask(task: Task, patch: Partial<Pick<Task, 'status' | 'planApproved' | 'manualOverride' | 'assigneeId' | 'description'>>): Task {
+  updateTask(
+    task: Task,
+    patch: Partial<Pick<Task, 'status' | 'planApproved' | 'manualOverride' | 'assigneeId' | 'description'>>,
+  ): Task {
     const next: Task = { ...task, ...patch, updatedAt: now() };
     this.#db
-      .prepare('update task set status = ?, plan_approved = ?, manual_override = ?, assignee_id = ?, description = ?, updated_at = ? where id = ?')
+      .prepare(
+        'update task set status = ?, plan_approved = ?, manual_override = ?, assignee_id = ?, description = ?, updated_at = ? where id = ?',
+      )
       .run(
-        next.status, next.planApproved ? 1 : 0, next.manualOverride ? 1 : 0,
-        next.assigneeId, next.description, next.updatedAt, next.id,
+        next.status,
+        next.planApproved ? 1 : 0,
+        next.manualOverride ? 1 : 0,
+        next.assigneeId,
+        next.description,
+        next.updatedAt,
+        next.id,
       );
     return next;
   }
@@ -241,14 +261,17 @@ export class Store {
       error: null,
     };
     this.#db
-      .prepare('insert into run (id, task_id, agent_id, node_id, originator_id, state, started_at, ended_at, error) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare(
+        'insert into run (id, task_id, agent_id, node_id, originator_id, state, started_at, ended_at, error) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
       .run(run.id, run.taskId, run.agentId, run.nodeId, run.originatorId, run.state, null, null, null);
     return run;
   }
 
   setRunState(runId: string, state: RunState, options: { error?: string | null } = {}): void {
     const finished = state === 'completed' || state === 'failed' || state === 'cancelled';
-    const startedAt = this.#db.prepare('select started_at from run where id = ?').get(runId) as unknown as { started_at: string | null } | undefined;
+    const startedAt = this.#db.prepare('select started_at from run where id = ?').get(runId) as unknown as
+      { started_at: string | null } | undefined;
     const start = startedAt?.started_at ?? (state === 'running' ? now() : null);
     this.#db
       .prepare('update run set state = ?, started_at = ?, ended_at = ?, error = ? where id = ?')
@@ -289,11 +312,18 @@ export class Store {
       generated: input.generated ?? false,
     };
     this.#db
-      .prepare('insert into report (id, run_id, state, summary, decisions_json, artifacts_json, blockers_json, usage_json, generated) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare(
+        'insert into report (id, run_id, state, summary, decisions_json, artifacts_json, blockers_json, usage_json, generated) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
       .run(
-        report.id, report.runId, report.state, report.summary,
-        JSON.stringify(report.decisions), JSON.stringify(report.artifacts),
-        JSON.stringify(report.blockers), JSON.stringify(report.usage),
+        report.id,
+        report.runId,
+        report.state,
+        report.summary,
+        JSON.stringify(report.decisions),
+        JSON.stringify(report.artifacts),
+        JSON.stringify(report.blockers),
+        JSON.stringify(report.usage),
         report.generated ? 1 : 0,
       );
     return report;
@@ -307,7 +337,9 @@ export class Store {
   /** 任务最近一次的报告，用于卡片详情和状态推导。 */
   latestReport(taskId: string): Report | undefined {
     const row = this.#db
-      .prepare('select r.* from report r join run u on u.id = r.run_id where u.task_id = ? order by u.rowid desc limit 1')
+      .prepare(
+        'select r.* from report r join run u on u.id = r.run_id where u.task_id = ? order by u.rowid desc limit 1',
+      )
       .get(taskId);
     return row === undefined ? undefined : mapReport(row as unknown as RawReport);
   }
@@ -332,8 +364,20 @@ export class Store {
       decidedBy: null,
     };
     this.#db
-      .prepare('insert into approval (id, project_id, task_id, kind, state, payload_json, requested_at, decided_at, decided_by) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(approval.id, approval.projectId, approval.taskId, approval.kind, approval.state, JSON.stringify(approval.payload), approval.requestedAt, null, null);
+      .prepare(
+        'insert into approval (id, project_id, task_id, kind, state, payload_json, requested_at, decided_at, decided_by) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        approval.id,
+        approval.projectId,
+        approval.taskId,
+        approval.kind,
+        approval.state,
+        JSON.stringify(approval.payload),
+        approval.requestedAt,
+        null,
+        null,
+      );
     return approval;
   }
 
@@ -343,20 +387,27 @@ export class Store {
   }
 
   listApprovals(projectId: string, state?: ApprovalState): Approval[] {
-    const rows = state === undefined
-      ? this.#db.prepare('select * from approval where project_id = ? order by requested_at, id').all(projectId)
-      : this.#db.prepare('select * from approval where project_id = ? and state = ? order by requested_at, id').all(projectId, state);
+    const rows =
+      state === undefined
+        ? this.#db.prepare('select * from approval where project_id = ? order by requested_at, id').all(projectId)
+        : this.#db
+            .prepare('select * from approval where project_id = ? and state = ? order by requested_at, id')
+            .all(projectId, state);
     return rows.map((row) => mapApproval(row as unknown as RawApproval));
   }
 
   /** 某个任务的最终审批（人终审）。 */
   finalApproval(taskId: string): Approval | undefined {
-    const row = this.#db.prepare("select * from approval where task_id = ? and kind = 'final' order by requested_at desc limit 1").get(taskId);
+    const row = this.#db
+      .prepare("select * from approval where task_id = ? and kind = 'final' order by requested_at desc limit 1")
+      .get(taskId);
     return row === undefined ? undefined : mapApproval(row as unknown as RawApproval);
   }
 
   decideApproval(id: string, state: 'approved' | 'rejected', decidedBy: string): Approval {
-    this.#db.prepare('update approval set state = ?, decided_at = ?, decided_by = ? where id = ?').run(state, now(), decidedBy, id);
+    this.#db
+      .prepare('update approval set state = ?, decided_at = ?, decided_by = ? where id = ?')
+      .run(state, now(), decidedBy, id);
     const approval = this.getApproval(id);
     if (approval === undefined) throw new Error(`Approval not found: ${id}`);
     return approval;
@@ -364,8 +415,15 @@ export class Store {
 
   // ── 事件（只追加） ───────────────────────────────────────────────────────
 
-  appendEvent(input: { projectId: string; type: string; actor: string; payload?: Record<string, unknown> }): ProjectEvent {
-    const next = this.#db.prepare('select coalesce(max(seq), 0) + 1 as seq from event where project_id = ?').get(input.projectId) as unknown as { seq: number };
+  appendEvent(input: {
+    projectId: string;
+    type: string;
+    actor: string;
+    payload?: Record<string, unknown>;
+  }): ProjectEvent {
+    const next = this.#db
+      .prepare('select coalesce(max(seq), 0) + 1 as seq from event where project_id = ?')
+      .get(input.projectId) as unknown as { seq: number };
     const event: ProjectEvent = {
       id: newId('evt'),
       projectId: input.projectId,
@@ -376,8 +434,18 @@ export class Store {
       createdAt: now(),
     };
     this.#db
-      .prepare('insert into event (id, project_id, seq, type, actor, payload_json, created_at) values (?, ?, ?, ?, ?, ?, ?)')
-      .run(event.id, event.projectId, event.seq, event.type, event.actor, JSON.stringify(event.payload), event.createdAt);
+      .prepare(
+        'insert into event (id, project_id, seq, type, actor, payload_json, created_at) values (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        event.id,
+        event.projectId,
+        event.seq,
+        event.type,
+        event.actor,
+        JSON.stringify(event.payload),
+        event.createdAt,
+      );
     return event;
   }
 
@@ -399,24 +467,61 @@ export class Store {
 }
 
 interface RawTask {
-  id: string; project_id: string; title: string; description: string; status: string; kind: string;
-  assignee_kind: string; assignee_id: string | null; deps_json: string; manual_override: number;
-  plan_approved: number; created_at: string; updated_at: string;
+  id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  status: string;
+  kind: string;
+  assignee_kind: string;
+  assignee_id: string | null;
+  deps_json: string;
+  manual_override: number;
+  plan_approved: number;
+  created_at: string;
+  updated_at: string;
 }
 interface RawRun {
-  id: string; task_id: string; agent_id: string; node_id: string; originator_id: string;
-  state: string; started_at: string | null; ended_at: string | null; error: string | null;
+  id: string;
+  task_id: string;
+  agent_id: string;
+  node_id: string;
+  originator_id: string;
+  state: string;
+  started_at: string | null;
+  ended_at: string | null;
+  error: string | null;
 }
 interface RawReport {
-  id: string; run_id: string; state: string; summary: string; decisions_json: string;
-  artifacts_json: string; blockers_json: string; usage_json: string; generated: number;
+  id: string;
+  run_id: string;
+  state: string;
+  summary: string;
+  decisions_json: string;
+  artifacts_json: string;
+  blockers_json: string;
+  usage_json: string;
+  generated: number;
 }
 interface RawApproval {
-  id: string; project_id: string; task_id: string | null; kind: string; state: string;
-  payload_json: string; requested_at: string; decided_at: string | null; decided_by: string | null;
+  id: string;
+  project_id: string;
+  task_id: string | null;
+  kind: string;
+  state: string;
+  payload_json: string;
+  requested_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
 }
 interface RawEvent {
-  id: string; project_id: string; seq: number; type: string; actor: string; payload_json: string; created_at: string;
+  id: string;
+  project_id: string;
+  seq: number;
+  type: string;
+  actor: string;
+  payload_json: string;
+  created_at: string;
 }
 
 const mapTask = (raw: RawTask): Task => ({

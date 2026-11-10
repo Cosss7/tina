@@ -149,7 +149,11 @@ export async function serveEngine(options: ServeEngineOptions): Promise<ServedEn
           send({ jsonrpc: '2.0', id, result: await call(method, () => Promise.resolve(backend.capabilities())) });
           return;
         case 'createSession':
-          send({ jsonrpc: '2.0', id, result: await call(method, () => backend.createSession(params as CreateSessionParams)) });
+          send({
+            jsonrpc: '2.0',
+            id,
+            result: await call(method, () => backend.createSession(params as CreateSessionParams)),
+          });
           return;
         case 'send':
           send({ jsonrpc: '2.0', id, result: await call(method, () => backend.send(params as SendParams)) });

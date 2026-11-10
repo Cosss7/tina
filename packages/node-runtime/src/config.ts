@@ -65,7 +65,8 @@ function parseProjects(raw: string | undefined): ProjectRef[] {
     if (typeof item !== 'object' || item === null) throw new Error(`TINA_PROJECTS[${index}] must be an object`);
     const project = item as Record<string, unknown>;
     if (typeof project.id !== 'string' || project.id === '') throw new Error(`TINA_PROJECTS[${index}].id is required`);
-    if (typeof project.name !== 'string' || project.name === '') throw new Error(`TINA_PROJECTS[${index}].name is required`);
+    if (typeof project.name !== 'string' || project.name === '')
+      throw new Error(`TINA_PROJECTS[${index}].name is required`);
     return { id: project.id, name: project.name };
   });
 }

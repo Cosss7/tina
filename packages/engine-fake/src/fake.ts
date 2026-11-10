@@ -93,7 +93,10 @@ class FakeEngine implements EngineBackend {
     return Promise.resolve({ ok: true });
   }
 
-  async #replay(session: SessionState, events: readonly { type: string; payload?: Record<string, unknown>; delayMs?: number }[]): Promise<void> {
+  async #replay(
+    session: SessionState,
+    events: readonly { type: string; payload?: Record<string, unknown>; delayMs?: number }[],
+  ): Promise<void> {
     for (const [index, spec] of events.entries()) {
       const delay = (spec.delayMs ?? 0) + this.#intervalMs;
       if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));

@@ -17,8 +17,11 @@ make up
 
 ```sh
 make demo      # 自动演示完整闭环；数据保留在输出的 .build/demo-* 目录
-make verify    # 构建、类型检查和离线测试，不调用模型
+make format    # 格式化 Go、前端、脚本与配置；提交前执行
+make verify    # 格式检查、构建、类型检查和离线测试，不调用模型
 ```
+
+CI 通过 `make verify` 检查格式；在 GitHub 分支规则中将 `verify` 设为必过检查，即可阻止格式检查失败的 PR 合并。格式化要求见 [AGENTS.md](AGENTS.md)。
 
 日常启动默认使用 `.tina/control-plane.db` 保存项目、`.tina/tinad.json` 保存本机私有授权、`.tina/tinad.db` 保存执行命令和待回传事实；Ctrl+C 停止，下次启动保留数据。清理 `.build` 不会删除默认项目库。
 

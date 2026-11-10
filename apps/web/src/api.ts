@@ -34,7 +34,13 @@ export interface RunView {
   stop?: { mode: string; root: string; workload: string; sessionUsable: boolean; detail?: string };
 }
 
-export interface AgentView { id: string; name: string; role: string; nodeId: string; engineId: string }
+export interface AgentView {
+  id: string;
+  name: string;
+  role: string;
+  nodeId: string;
+  engineId: string;
+}
 
 export interface ReportView {
   state: string;
@@ -96,23 +102,42 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   state: () => request<StateView>('/api/state'),
-  createProject: (name: string) => request<ProjectView>('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }),
+  createProject: (name: string) =>
+    request<ProjectView>('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }),
   board: (projectId: string) => request<BoardView>(`/api/board?project=${encodeURIComponent(projectId)}`),
   agents: (projectId: string) => request<AgentView[]>(`/api/projects/${encodeURIComponent(projectId)}/agents`),
-  run: (projectId: string, id: string) => request<{ run: RunView; report: ReportView | null }>(`/api/runs/${encodeURIComponent(id)}?project=${encodeURIComponent(projectId)}`),
-  assign: (projectId: string, id: string, agentId: string) => request<unknown>(`/api/tasks/${id}/assignee`, { method: 'PUT', body: JSON.stringify({ projectId, agentId }) }),
-  cancel: (projectId: string, id: string) => request<unknown>(`/api/runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ projectId, reason: '用户取消' }) }),
-  reconcile: (projectId: string, id: string) => request<unknown>(`/api/runs/${id}/reconcile`, { method: 'POST', body: JSON.stringify({ projectId }) }),
+  run: (projectId: string, id: string) =>
+    request<{ run: RunView; report: ReportView | null }>(
+      `/api/runs/${encodeURIComponent(id)}?project=${encodeURIComponent(projectId)}`,
+    ),
+  assign: (projectId: string, id: string, agentId: string) =>
+    request<unknown>(`/api/tasks/${id}/assignee`, { method: 'PUT', body: JSON.stringify({ projectId, agentId }) }),
+  cancel: (projectId: string, id: string) =>
+    request<unknown>(`/api/runs/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ projectId, reason: '用户取消' }),
+    }),
+  reconcile: (projectId: string, id: string) =>
+    request<unknown>(`/api/runs/${id}/reconcile`, { method: 'POST', body: JSON.stringify({ projectId }) }),
   createCard: (projectId: string, title: string, description: string) =>
     request<CardView>('/api/cards', { method: 'POST', body: JSON.stringify({ projectId, title, description }) }),
   requestPlan: (projectId: string, taskId: string) =>
     request<{ run: RunView }>('/api/plans', { method: 'POST', body: JSON.stringify({ projectId, taskId }) }),
   decidePlan: (projectId: string, approvalId: string, decision: 'approved' | 'rejected') =>
-    request<unknown>(`/api/plans/${approvalId}/decide`, { method: 'POST', body: JSON.stringify({ projectId, decision }) }),
+    request<unknown>(`/api/plans/${approvalId}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ projectId, decision }),
+    }),
   dispatch: (projectId: string, taskId: string, resumeFromRunId?: string) =>
-    request<unknown>(`/api/tasks/${taskId}/dispatch`, { method: 'POST', body: JSON.stringify({ projectId, resumeFromRunId }) }),
+    request<unknown>(`/api/tasks/${taskId}/dispatch`, {
+      method: 'POST',
+      body: JSON.stringify({ projectId, resumeFromRunId }),
+    }),
   review: (projectId: string, taskId: string, decision: 'approved' | 'rejected', note = '') =>
-    request<unknown>(`/api/tasks/${taskId}/review`, { method: 'POST', body: JSON.stringify({ projectId, decision, note }) }),
+    request<unknown>(`/api/tasks/${taskId}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ projectId, decision, note }),
+    }),
 };
 
 export const COLUMNS: Array<{ key: CardView['status']; label: string }> = [

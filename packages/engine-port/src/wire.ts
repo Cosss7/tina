@@ -13,13 +13,7 @@ export const PROTOCOL_VERSION = 1;
 
 /** 端口事件只有这七种，属于产品侧词汇；引擎原生类型不越过这条线。 */
 export type EngineEventType =
-  | 'turn.start'
-  | 'turn.end'
-  | 'message.start'
-  | 'message.end'
-  | 'tool.call'
-  | 'tool.result'
-  | 'error';
+  'turn.start' | 'turn.end' | 'message.start' | 'message.end' | 'tool.call' | 'tool.result' | 'error';
 
 export interface EngineEvent {
   /** 单调递增，从 0 开始，跨会话共享。 */
@@ -173,11 +167,7 @@ export interface JsonRpcFailure {
   error: { code: number; message: string; data?: unknown };
 }
 
-export type JsonRpcMessage =
-  | JsonRpcRequest
-  | JsonRpcNotification
-  | JsonRpcSuccess
-  | JsonRpcFailure;
+export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcSuccess | JsonRpcFailure;
 
 export function encodeMessage(message: JsonRpcMessage): string {
   return `${JSON.stringify(message)}\n`;

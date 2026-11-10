@@ -53,7 +53,14 @@ export interface CardView {
 export interface Board {
   projectId: string;
   cards: CardView[];
-  approvals: Array<{ id: string; kind: string; state: string; taskId: string | null; payload: Record<string, unknown>; requestedAt: string }>;
+  approvals: Array<{
+    id: string;
+    kind: string;
+    state: string;
+    taskId: string | null;
+    payload: Record<string, unknown>;
+    requestedAt: string;
+  }>;
 }
 
 export class Service {
@@ -86,7 +93,13 @@ export class Service {
         kind: fresh.kind,
         assigneeId: fresh.assigneeId,
         planApproved: fresh.planApproved,
-        runs: runs.map((run) => ({ id: run.id, state: run.state, startedAt: run.startedAt, endedAt: run.endedAt, error: run.error })),
+        runs: runs.map((run) => ({
+          id: run.id,
+          state: run.state,
+          startedAt: run.startedAt,
+          endedAt: run.endedAt,
+          error: run.error,
+        })),
         latestReport:
           report === undefined
             ? null
@@ -139,7 +152,9 @@ export class Service {
     if (task.projectId !== input.projectId) throw new ServiceError('not_found', 'Card does not belong to this project');
     if (task.planApproved) throw new ServiceError('conflict', 'Card plan is already approved');
 
-    const open = this.#store.listApprovals(input.projectId, 'pending').filter((approval) => approval.kind === 'plan' && approval.taskId === task.id);
+    const open = this.#store
+      .listApprovals(input.projectId, 'pending')
+      .filter((approval) => approval.kind === 'plan' && approval.taskId === task.id);
     if (open.length > 0) throw new ServiceError('conflict', 'Card already has a pending plan');
 
     const result = await this.#runTurn(buildPlanPrompt({ title: task.title, description: task.description }));
@@ -167,7 +182,10 @@ export class Service {
 
   // ── 批计划 ───────────────────────────────────────────────────────────────
 
-  decidePlan(input: { approvalId: string; decision: 'approved' | 'rejected'; actor: string }): { approval: Approval; tasks: Task[] } {
+  decidePlan(input: { approvalId: string; decision: 'approved' | 'rejected'; actor: string }): {
+    approval: Approval;
+    tasks: Task[];
+  } {
     const approval = this.#store.getApproval(input.approvalId);
     if (approval === undefined) throw new ServiceError('not_found', 'Approval not found');
     if (approval.kind !== 'plan') throw new ServiceError('invalid_argument', 'Approval is not for a plan');
@@ -186,7 +204,9 @@ export class Service {
     const created: Task[] = [];
     const keys = new Map<string, string>();
     for (const card of cards) {
-      const description = [card.description, '', '验收标准：', ...card.acceptance.map((item) => `- ${item}`)].join('\n').trim();
+      const description = [card.description, '', '验收标准：', ...card.acceptance.map((item) => `- ${item}`)]
+        .join('\n')
+        .trim();
       const deps = card.deps.map((key) => keys.get(key)).filter((id): id is string => id !== undefined);
       const task = this.#store.createTask({
         projectId: approval.projectId,
@@ -225,17 +245,35 @@ export class Service {
    */
   dispatch(input: { taskId: string; actor: string }): { run: Run; task: Task } {
     const task = this.#requireTask(input.taskId);
-    if (task.kind === 'demand') throw new ServiceError('invalid_argument', 'Split the request into tasks before dispatching');
+    if (task.kind === 'demand')
+      throw new ServiceError('invalid_argument', 'Split the request into tasks before dispatching');
     if (!task.planApproved) throw new ServiceError('conflict', 'Plan is not approved');
 
-    const active = this.#store.listRuns(task.id).filter((run) => ['queued', 'dispatched', 'running'].includes(run.state));
+    const active = this.#store
+      .listRuns(task.id)
+      .filter((run) => ['queued', 'dispatched', 'running'].includes(run.state));
     if (active.length > 0) throw new ServiceError('conflict', 'Card already has an active run');
 
-    const run = this.#store.createRun({ taskId: task.id, agentId: this.#workerAgentId, nodeId: this.#nodeId, originatorId: input.actor });
-    this.#store.appendEvent({ projectId: task.projectId, type: 'run.queued', actor: input.actor, payload: { runId: run.id, taskId: task.id } });
+    const run = this.#store.createRun({
+      taskId: task.id,
+      agentId: this.#workerAgentId,
+      nodeId: this.#nodeId,
+      originatorId: input.actor,
+    });
+    this.#store.appendEvent({
+      projectId: task.projectId,
+      type: 'run.queued',
+      actor: input.actor,
+      payload: { runId: run.id, taskId: task.id },
+    });
     this.#store.setRunState(run.id, 'dispatched');
     this.#store.setRunState(run.id, 'running');
-    this.#store.appendEvent({ projectId: task.projectId, type: 'run.started', actor: this.#workerAgentId, payload: { runId: run.id, taskId: task.id } });
+    this.#store.appendEvent({
+      projectId: task.projectId,
+      type: 'run.started',
+      actor: this.#workerAgentId,
+      payload: { runId: run.id, taskId: task.id },
+    });
     const { task: running } = refreshStatus(this.#store, this.#requireTask(task.id));
 
     this.#inflight.set(run.id, this.#execute(run, task));
@@ -263,12 +301,22 @@ export class Service {
         usage: { ...report.usage, engineUsage: result.usage },
       });
       this.#store.setRunState(run.id, 'completed');
-      this.#store.appendEvent({ projectId: task.projectId, type: 'run.completed', actor: this.#workerAgentId, payload: { runId: run.id, state: report.state } });
+      this.#store.appendEvent({
+        projectId: task.projectId,
+        type: 'run.completed',
+        actor: this.#workerAgentId,
+        payload: { runId: run.id, state: report.state },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#store.createReport({ runId: run.id, state: 'failed', summary: `Run failed: ${message}`, generated: true });
       this.#store.setRunState(run.id, 'failed', { error: message });
-      this.#store.appendEvent({ projectId: task.projectId, type: 'run.failed', actor: this.#workerAgentId, payload: { runId: run.id, error: message } });
+      this.#store.appendEvent({
+        projectId: task.projectId,
+        type: 'run.failed',
+        actor: this.#workerAgentId,
+        payload: { runId: run.id, error: message },
+      });
     } finally {
       refreshStatus(this.#store, this.#requireTask(task.id));
     }
