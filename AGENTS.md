@@ -10,10 +10,6 @@ Tina 是一个以任务看板为中心的人机协作平台：人和智能体在
 
 控制面持有项目权威数据，Go tinad 承载 Router/Worker 执行，普通适配器为内部 Go 模块。当前不引入 Effect。启动、配置与旧库导入见 [README.md](README.md)。
 
-- 动架构或产品方向之前读 `docs/vision.md`。
-- 打 tag、改版本号、写发布说明之前读 `docs/versioning.md`。
-- `docs/h0.md` 保持原样作为已交付版本的规格，改它等于改历史，除非要修错。
-
 ## 代码布局
 
 ```

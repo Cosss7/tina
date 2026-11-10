@@ -1,10 +1,9 @@
 # 执行协议 v1
 
-> P6 · 2026-11-10 · 已有 Go 消息、编解码器、网络接线与执行验收。
 > 修改控制面与 tinad 的消息、重放、对账或适配调用前读取本文。
 > 数据边界见 [架构](architecture.md)，操作语义见 [适配契约](engine-adapter-contract.md)。
 
-本协议只传递执行请求和事实。P1–P6 已实现控制面业务、带节点凭据的 WebSocket 执行接线、tinad 持久回传、引擎监管、取消、恢复与异常对账，见 [控制面项目服务](control-plane.md) 与 [tinad](tinad.md)。没有已绑定的执行节点时请求保持 queued。
+本协议只传递控制面与 tinad 之间的执行请求和事实。项目业务由 [控制面](control-plane.md) 维护，本机执行资源由 [tinad](tinad.md) 管理。
 
 ## 1. 数据边界
 
@@ -18,11 +17,11 @@ Task 可有多次 Run；一次 Run 对应一个业务尝试与一份最终报告
 
 `Execution` 为所有执行命令、回执和事实提供六个必填关联：`projectId`、`runId`、`agentId`、`nodeId`、`sessionId`、`activityId`。授权来自经过认证的绑定和本机策略，不能把消息中的 ID 当作授权证明。注册报告已有身份及可用性，不创建项目，也不擅自修改成员角色。
 
-`SessionHandle` 包含 `engineId`、`sessionId`、`nativeId`，可带非敏感 `metadata`。`instanceId` 标识本次运行时实例；恢复可沿用会话和原生句柄，必须产生新的执行实例。Run、进程 PID 和引擎品牌都不能充当持久会话身份。
+`SessionHandle` 包含 `engineId`、`sessionId`、`nativeId`，可带非敏感 `metadata`。`instanceId` 标识本次运行时实例；释放运行时后恢复可沿用会话和原生句柄，但会产生新的执行实例。Run、进程 PID 和引擎品牌都不能充当持久会话身份。
 
 ## 2. 消息封装
 
-共享实现位于 `packages/protocol`，使用独立 Go module，标准库 JSON，无 protobuf 生成步骤。线格式不含 Go 类型信息。每次编码产生一个 UTF-8 JSON 对象；网络连接与帧边界在 P3 接线时确定，编解码器不打开端口。
+共享实现位于 `packages/protocol`，线格式不含 Go 类型信息。每条消息是一个 UTF-8 JSON 对象，通过经过认证的 WebSocket 文本帧传递；编解码器与连接管理分别负责序列化和传输。
 
 ```json
 {
@@ -67,7 +66,7 @@ v1 拒绝未知版本、未知消息、未知字段、空身份、空/null paylo
 
 事件 kind 与载荷：`session.opened` 可带真实 `handle`，无持久句柄时不编造；`activity.started` 无附加载荷；`message` 带 `text`；`tool.call/tool.result` 带 `tool`；`usage` 带非负 `inputTokens/outputTokens`；`interaction.request` 带 `interaction{requestId,kind,prompt}`；`stop` 带停止证据。每条只能带与 kind 对应的载荷。`interaction.kind` 为 `approval` 或 `question`。工具调用至少包含 `callId/name`，结果至少包含 `callId`，可带 `input/output/isError`。
 
-每个执行实例的 event 与 result 共用从 1 开始、严格递增的 `seq`，跨活动不重置；重放保留原序号、消息 ID 和时间。接收端按节点、实例、序号去重并核验活动关联，不能把 `occurredAt` 当作跨机器排序依据。对账游标按活动记录最近事实，可存在序号间隔。需要重放且尚未 ack 的记录必须持久保留；这些持久性由 P3 的回传日志实现，P1 codec 只验证单条消息。
+每个执行实例的 event 与 result 共用从 1 开始、严格递增的 `seq`，跨活动不重置；重放保留原序号、消息 ID 和时间。接收端按节点、实例、序号去重并核验活动关联，不能把 `occurredAt` 当作跨机器排序依据。对账游标按活动记录最近事实，可存在序号间隔。尚未 ack 的可重放消息由 [tinad 的执行日志](tinad.md#持久执行与连接恢复) 持久保留。
 
 ## 4. 接受、终态与取消
 
@@ -103,25 +102,39 @@ v1 拒绝未知版本、未知消息、未知字段、空身份、空/null paylo
 
 ## 6. 内部 Go 适配接口
 
-实现入口为 `services/tinad/internal/engine`，使用内部模块调用，不增加自定义 TCP 适配层。
-
-| 接口 | 操作 |
-|---|---|
-| `Driver` | `Definition`、`Probe`、`Create`；按引擎或协议族复用 |
-| `Resumer`（可选） | `Resume`；注册时校验声明，运行时检查真实句柄及可用能力 |
-| `Session` | `Info`、`Submit`、`Updates`、`Close`；每个实例维护隔离状态 |
-| `Interrupter`（可选） | `Interrupt(ctx, activityID)`；调用者已选择准确实例，不能以旧活动取消新活动 |
-| `Responder`（可选） | `Respond(ctx, requestID, answer)`；调用者先校验实例、活动和待答请求 |
-
-`Capabilities` 目前包含 resume、interrupt（none/turn/process）、respond。静态声明 → Probe → 会话只能收窄；注册表拒绝缺少恢复入口的驱动，创建时拒绝缺少中断/交互入口的会话，并尝试释放无效运行时。恢复返回不同原生 ID 也会被拒绝。运行中补充输入尚未发布为能力；当前 fake 对忙碌会话明确拒绝。
-
-Submit 的 context 约束本次调用等待，不承担整个活动生命周期；取消活动必须走显式 Interrupt。Close 释放运行时，不删除原生历史。恢复后的新实例不能沿用旧实例的调用或事件。
-
-fake 可人工触发 Complete，支持多个隔离会话、命令去重、当前回合取消、Close 后 Resume。同一 Driver 内保存内存历史；新 Driver 不持有旧历史，必须拒绝恢复。它没有 OS 子进程，进程证据为 not_applicable，不能代替真实 dsh 的进程监管验收。命令去重也仅覆盖当前内存实例；跨重启日志在 P3 实现。
+执行消息在 tinad 内部被转换为工厂与会话调用。接口定义、能力收窄以及调用生命周期由 [适配契约](engine-adapter-contract.md#4-最小操作与可选能力) 维护；具体引擎的进程与历史管理见 [引擎接入](tinad.md#引擎接入)。
 
 ## 7. 完整业务路径与样例
 
-可机器读取的 v1 消息见 [`flow.json`](../packages/protocol/testdata/flow.json)，包含一次注册、Router dispatch/result、Worker dispatch/result。计划和报告文本沿用 H0 的字段；这份样例不是新的业务 API。
+可机器读取的 v1 消息见 [`flow.json`](../packages/protocol/testdata/flow.json)，包含注册与 Router/Worker dispatch/result。业务 API 和计划审批规则见 [控制面项目服务](control-plane.md)。
+
+```mermaid
+sequenceDiagram
+  participant U as 用户与看板
+  participant CP as 控制面
+  participant TR as Router 所在 tinad
+  participant R as Router 引擎
+  participant TW as Worker 所在 tinad
+  participant W as Worker 引擎
+  U->>CP: 创建需求并请求计划
+  CP->>CP: 保存业务记录与执行请求
+  CP->>TR: 派发 Router 请求及上下文
+  TR->>R: 创建或恢复会话，提交输入
+  R-->>TR: 计划建议与执行结果
+  TR-->>CP: 回传事实
+  CP->>CP: 校验并保存待批计划
+  CP-->>U: 展示计划
+  U->>CP: 批准
+  CP->>CP: 创建任务，检查依赖，建立 Run
+  CP->>TW: 派发 Worker 请求
+  TW->>W: 提交任务
+  TW-->>CP: 投递与执行启动事实
+  W-->>TW: 执行事件、报告与终态
+  TW-->>CP: 回传并等待确认
+  CP->>CP: 去重、落库、推导评审中
+  U->>CP: 终审
+  CP-->>U: 已完成
+```
 
 | 顺序 | 控制面的业务工作 | 通过 tinad 的执行消息 |
 |---|---|---|
@@ -131,7 +144,3 @@ fake 可人工触发 Complete，支持多个隔离会话、命令去重、当前
 | 4 | 建立 Worker Run，检查授权与依赖 | dispatch → receipt → activity.started → result（报告文本） |
 | 5 | 校验报告，去重落库，推导评审中；人终审 | 无终审 RPC；持久保存执行事实后 ack |
 | 6 | 若执行中请求取消，保存取消请求 | cancel → receipt；获得停止证据才 result(cancelled)，未知则 reconcile |
-
-P1 的自动验证包括消息双向编解码、非法字段与关联拒绝、未知投递和对账状态、停止证据校验、fake 多会话隔离、恢复拒绝、回执丢失后的重复命令、完成与取消竞争，以及 Router/Worker 经 JSON → 同一适配接口 → JSON 返回结果。真实业务事务和跨进程闭环在 P2–P4 验证。
-
-运行 `make verify` 同时检查 H0 与新 Go 契约；单独运行可用 `go -C packages/protocol test ./...` 和 `go -C services/tinad test ./...`。
